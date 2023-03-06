@@ -1,0 +1,52 @@
+Metadata-Version: 2.2
+Name: mushan
+Version: 0.0.14
+Summary: Personal toolkit.
+Home-page: https://github.com/mushanshanshan/mushan-pip
+Author: Mushan
+Author-email: wwd137669793@gmail.com
+License: None
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.6
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: Cython
+Requires-Dist: librosa
+Requires-Dist: matplotlib
+Requires-Dist: numpy
+Requires-Dist: phonemizer
+Requires-Dist: scipy
+Requires-Dist: tensorboard
+Requires-Dist: Unidecode
+Requires-Dist: p_tqdm
+Requires-Dist: varname
+Requires-Dist: tqdm
+Requires-Dist: loguru
+Requires-Dist: dotmap
+Requires-Dist: inflect
+Requires-Dist: encodec
+Requires-Dist: lhotse
+Requires-Dist: torchaudio
+Requires-Dist: pysptk
+Requires-Dist: fastdtw
+Requires-Dist: pyworld
+Dynamic: author
+Dynamic: author-email
+Dynamic: classifier
+Dynamic: description
+Dynamic: description-content-type
+Dynamic: home-page
+Dynamic: license
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary
+
+<!--
+ * @Date: 2022-07-20 15:22:19
+ * @LastEditors: mushan wwd137669793@gmail.com
+ * @LastEditTime: 2023-01-05 18:11:54
+ * @FilePath: /mushan/README.md
+-->
+A Toolkit By Mushan.
