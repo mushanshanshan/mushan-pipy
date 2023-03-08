@@ -1,0 +1,3 @@
+[console_scripts]
+mushan = mushan.shell:run
+

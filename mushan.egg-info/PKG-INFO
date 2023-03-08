@@ -1,0 +1,24 @@
+Metadata-Version: 2.1
+Name: mushan
+Version: 0.0.8
+Summary: Personal toolkit.
+Home-page: https://github.com/mushanshanshan/mushan-pip
+Author: Mushan
+Author-email: wwd137669793@gmail.com
+License: None
+Platform: UNKNOWN
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.6
+Description-Content-Type: text/markdown
+License-File: LICENSE
+
+<!--
+ * @Date: 2022-07-20 15:22:19
+ * @LastEditors: mushan wwd137669793@gmail.com
+ * @LastEditTime: 2023-01-05 18:11:54
+ * @FilePath: /mushan/README.md
+-->
+A Toolkit By Mushan.
+

@@ -1,0 +1,9 @@
+Cython
+librosa
+matplotlib
+numpy
+phonemizer
+scipy
+tensorboard
+Unidecode
+p_tqdm
