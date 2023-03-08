@@ -124,7 +124,7 @@ def get_feature(audio, sr=22050, n_fft=1024, hop_size=256, win_size=1024, n_mel=
                                 sr=sr
                                 )
     else:
-        mel=spec
+        mel = None
     
     # audio_norm = torch.nn.functional.pad(audio_norm, (int((n_fft-hop_size)/2), int((n_fft-hop_size)/2)), mode='reflect')
     
@@ -137,33 +137,28 @@ def get_feature(audio, sr=22050, n_fft=1024, hop_size=256, win_size=1024, n_mel=
                         hop_length=hop_size,
                         center=False)[0].squeeze(0)
     else:
-        F0 = np.zeros(spec.size(1))
+        F0 = None
 
 
     if need_energy:
         eng = librosa.feature.rms(y=audio_norm.numpy(), frame_length=n_fft, hop_length=hop_size, center=False)[0]
     else:
-        eng = np.zeros(spec.size(1))
+        eng = None
     
     
     audio_norm = audio_norm.squeeze(0)
     spec = spec.squeeze(0)
-    mel = mel.squeeze(0)
-    F0 = torch.from_numpy(F0)
-    eng = torch.from_numpy(eng).squeeze(0)
     
-    assert spec.size(1) ==  mel.size(1)
-    assert F0.size(0) ==  mel.size(1)
-    assert F0.size(0) ==  eng.size(0)
-    
-    max_len = min(spec.size(1),
-                  mel.size(1),
-                  F0.size(0),
-                  eng.size(0))
-    
-    spec = spec[:,:max_len]
-    mel = mel[:,:max_len]
-    F0 = F0[:max_len]
-    eng = eng[:max_len]
+    if need_mel:
+        assert spec.size(1) ==  mel.size(1)
+        mel = mel.squeeze(0)
+        
+    if need_f0:
+        assert spec.size(1) ==  F0.size(0)
+        F0 = torch.from_numpy(F0)
+        
+    if need_energy:
+        assert spec.size(1) ==  eng.size(0)
+        eng = torch.from_numpy(eng).squeeze(0)
 
     return audio_norm, spec, mel, F0, eng
