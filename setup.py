@@ -1,7 +1,7 @@
 '''
 Date: 2022-07-20 15:22:19
 LastEditors: mushan wwd137669793@gmail.com
-LastEditTime: 2023-03-08 10:55:10
+LastEditTime: 2023-03-08 11:25:46
 FilePath: /mushan-pipy/setup.py
 '''
 import os
@@ -15,7 +15,7 @@ EMAIL = "wwd137669793@gmail.com"
 URL = "None"
 LICENSE = "None"
 DESCRIPTION = "Personal toolkit."
-VERSION = "0.0.8"
+VERSION = "0.0.9"
 
 if sys.version_info < (3, 6, 0):
     raise RuntimeError(f"{NAME} requires Python >=3.6.0, but yours is {sys.version}!")
