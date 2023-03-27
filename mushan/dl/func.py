@@ -3,6 +3,9 @@ import os
 from varname import argname
 
 
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
 def enable_debug_mode():
     os.environ['MUSHAN_DEBUG']= "1"
     print("Debug model: Enable")

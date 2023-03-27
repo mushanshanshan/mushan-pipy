@@ -7,3 +7,8 @@ scipy
 tensorboard
 Unidecode
 p_tqdm
+varname
+tqdm
+loguru
+dotmap
+inflect
