@@ -2,6 +2,7 @@ from .audio import *
 from .data import *
 from .plot import *
 from .spec_process import *
+from .encodrc import AudioEnc
 
 LIBRISPEECH_PART = (
             "dev-clean",
