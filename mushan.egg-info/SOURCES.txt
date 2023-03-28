@@ -14,6 +14,7 @@ mushan.egg-info/zip-safe
 mushan/audio/__init__.py
 mushan/audio/audio.py
 mushan/audio/data.py
+mushan/audio/lhotse.py
 mushan/audio/plot.py
 mushan/audio/spec_process.py
 mushan/dl/__init__.py

@@ -12,3 +12,5 @@ tqdm
 loguru
 dotmap
 inflect
+encodec
+lhotse
