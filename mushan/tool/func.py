@@ -4,6 +4,7 @@ import os
 import logging
 import pickle
 import random
+import re, string
 
 def disable_logger(logger_name: List):
     for n in logger_name:
@@ -29,3 +30,7 @@ def dump_pickle(data, filename):
 
 def random_str(length):
     return os.urandom(length).hex()
+
+def remove_punc(s):
+    regex = re.compile('[%s]' % re.escape(string.punctuation))
+    return regex.sub('', s)

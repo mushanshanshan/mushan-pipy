@@ -11,7 +11,7 @@ class AudioEnc():
 
     def __init__(self, target_bandwidth = 12.0, device = -1):
         
-        assert target_bandwidth in [1.5, 3., 6, 12., 24.]
+        assert target_bandwidth in [1.5, 3., 6., 12., 24.]
         
         model = EncodecModel.encodec_model_24khz()
         model.set_target_bandwidth(target_bandwidth)
