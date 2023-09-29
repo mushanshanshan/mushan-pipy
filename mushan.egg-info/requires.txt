@@ -14,3 +14,4 @@ dotmap
 inflect
 encodec
 lhotse
+torchaudio
