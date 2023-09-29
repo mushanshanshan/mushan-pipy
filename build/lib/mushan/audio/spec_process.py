@@ -98,7 +98,7 @@ def linear_to_mel(spec, n_fft, num_mels, sr, fmin=0, fmax=None):
     spec = spectral_normalize_torch(spec)
     return spec
 
-def get_feature(audio, sr=22050, n_fft=1024, hop_size=256, win_size=1024, n_mel=80, need_f0=True, need_energy=True, need_mel=True):
+def get_feature(audio, sr=22050, n_fft=1024, hop_size=256, win_size=1024, n_mel=80, need_f0=False, need_energy=False, need_mel=False):
 
     if audio.max() > 1:
         audio = torch.FloatTensor(audio.astype(np.float32))
@@ -162,3 +162,27 @@ def get_feature(audio, sr=22050, n_fft=1024, hop_size=256, win_size=1024, n_mel=
         eng = torch.from_numpy(eng).squeeze(0)
 
     return audio_norm, spec, mel, F0, eng
+
+
+def get_linear_cuda(audio, cuda=0, sr=22050, n_fft=1024, hop_size=256, win_size=1024, n_mel=80, need_f0=False, need_energy=False, need_mel=False):
+
+    if audio.max() > 1:
+        audio = torch.FloatTensor(audio.astype(np.float32)).cuda(device=cuda)
+        audio_norm = audio / 2 ** 15
+        audio_norm = audio_norm.unsqueeze(0)
+    else:
+        audio_norm = torch.FloatTensor(audio.astype(np.float32)).cuda(device=cuda)
+        audio_norm = audio_norm.unsqueeze(0)
+        
+    audio_norm = torch.nn.functional.pad(audio_norm.unsqueeze(1), (int((n_fft-hop_size)/2), int((n_fft-hop_size)/2)), mode='reflect')
+    audio_norm = audio_norm.squeeze(1)
+
+    spec = audio_to_linear(audio_norm,
+                             n_fft=n_fft,
+                             sr=sr,
+                             hop_size=hop_size,
+                             win_size=win_size)
+
+    spec = spec.squeeze(0).cpu()
+
+    return spec
