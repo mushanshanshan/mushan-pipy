@@ -153,6 +153,8 @@ class Frontend():
                 with_tone=True, with_erhua=False)
         else:
             self._init_pypinyin()
+            
+        self.symbols_len = len(list(self.vocab_phones.keys()))
 
     def _init_pypinyin(self):
         """
