@@ -13,12 +13,14 @@ from .model import EncodecModel as encodec
 from .compress import compress, decompress
 
 
-def get_24k(bandwidth=24):
-    model = encodec.encodec_model_24khz()
+def get_24k(bandwidth=24, device='cpu'):
+    model = encodec.encodec_model_24khz().to(device)
+    model.device = device
     model.set_target_bandwidth(24)
     return model
 
-def get_48k(bandwidth=48):
-    model = encodec.encodec_model_48khz()
+def get_48k(bandwidth=48, device='cpu'):
+    model = encodec.encodec_model_48khz().to(device)
+    model.device = device
     model.set_target_bandwidth(24)
     return model

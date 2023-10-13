@@ -91,6 +91,7 @@ class EncodecModel(nn.Module):
                  overlap: float = 0.01,
                  name: str = 'unset'):
         super().__init__()
+        self.device = 'cpu'
         self.bandwidth: tp.Optional[float] = None
         self.target_bandwidths = target_bandwidths
         self.encoder = encoder
@@ -180,12 +181,64 @@ class EncodecModel(nn.Module):
         # codes is [B, K, T], with T frames, K nb of codebooks.
         return codes, scale
     
+    
+    def _encode_cont(self, x: torch.Tensor) -> tp.List[EncodedFrame]:
+        """Given a tensor `x`, returns a list of frames containing
+        the discrete encoded codes for `x`, along with rescaling factors
+        for each segment, when `self.normalize` is True.
+
+        Each frames is a tuple `(codebook, scale)`, with `codebook` of
+        shape `[B, K, T]`, with `K` the number of codebooks.
+        """
+        assert x.dim() == 3
+        _, channels, length = x.shape
+        assert channels > 0 and channels <= 2
+        segment_length = self.segment_length
+        if segment_length is None:
+            segment_length = length
+            stride = length
+        else:
+            stride = self.segment_stride  # type: ignore
+            assert stride is not None
+
+        encoded_frames: tp.List[EncodedFrame] = []
+        for offset in range(0, length, stride):
+            frame = x[:, :, offset: offset + segment_length]
+            encoded_frames.append(self._encode_frame_cont(frame))
+        return encoded_frames
+
+    def _encode_frame_cont(self, x: torch.Tensor) -> EncodedFrame:
+        length = x.shape[-1]
+        duration = length / self.sample_rate
+        assert self.segment is None or duration <= 1e-5 + self.segment
+
+        if self.normalize:
+            mono = x.mean(dim=1, keepdim=True)
+            volume = mono.pow(2).mean(dim=2, keepdim=True).sqrt()
+            scale = 1e-8 + volume
+            x = x / scale
+            scale = scale.view(-1, 1)
+        else:
+            scale = None
+
+        emb = self.encoder(x)
+        return emb
+    
     def wavfile_to_emb(self, wav) -> torch.Tensor:
         wav, sr = torchaudio.load(wav)
+        wav = wav.to(next(self.encoder.parameters()).device)
         wav = self.convert_audio(wav, sr, self.sample_rate, self.channels).unsqueeze(0)
         frame = self.encode(wav)[0][0]
         emb = self.idx_to_emb(frame)
         return emb
+    
+    def wavfile_to_cont_emb(self, wav) -> torch.Tensor:
+        wav, sr = torchaudio.load(wav)
+        wav = wav.to(next(self.encoder.parameters()).device)
+        wav = self.convert_audio(wav, sr, self.sample_rate, self.channels).unsqueeze(0)
+        emb = self._encode_cont(wav)[0][0]
+        return emb
+
 
     def decode(self, encoded_frames: tp.List[EncodedFrame]) -> torch.Tensor:
         """Decode the given frames into a waveform.
@@ -215,7 +268,7 @@ class EncodecModel(nn.Module):
         out = self.decoder(emb)
         return out
     
-    def idx_to_emb(self, codes)  -> torch.Tensor:
+    def idx_to_emb(self, codes) -> torch.Tensor:
         codes = codes.transpose(0, 1)
         emb = self.quantizer.decode(codes)
         return emb

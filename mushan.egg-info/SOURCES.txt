@@ -60,6 +60,8 @@ mushan/models/encodec/quantization/core_vq.py
 mushan/models/encodec/quantization/vq.py
 mushan/models/speaker_encoder/EPACA_TDNN.py
 mushan/models/speaker_encoder/__init__.py
+mushan/models/utmos/__init__.py
+mushan/models/utmos/score.py
 mushan/nb/__init__.py
 mushan/src/temp.txt
 mushan/text/__init__.py

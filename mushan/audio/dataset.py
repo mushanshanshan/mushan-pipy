@@ -60,7 +60,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         self.need_text = 'text' in config.data.data_list
         self.need_vc = 'vc' in config.data.data_list
         self.need_f0 = 'f0' in config.data.data_list
-        self.need_energy = 'energy' in config.data.data_list
+        self.aux_input = 'hu' in config.data.data_list
         self.need_mel = 'mel' in config.data.data_list
             
         self.text_cleaners = config.data.text_cleaners
@@ -166,6 +166,8 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         
         if self.need_ref:
             ref = self.get_ref_spec(spk)
+            if ref == None:
+                ref = spec
         else:
             ref = torch.zeros((1,1))
             
@@ -175,13 +177,13 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         else:
             f0 = torch.zeros(1)
             
-        if self.need_energy:
-            energy = self.get_energy(audiopath)
-            assert spec.shape[-1] == energy.shape[-1], f"spec.shape={spec.shape}, energy.shape={energy.shape}"
+        if self.aux_input:
+            aux = self.get_aux_input(audiopath)
+            assert spec.shape[-1] == aux.shape[-1], f"spec.shape={spec.shape}, aux.shape={aux.shape}"
         else:
-            energy = torch.zeros(1)
+            aux = torch.zeros(1,1)
             
-        return (text, spec, wav, ref, f0, energy)
+        return (text, spec, wav, ref, f0, aux)
 
     def get_ref_spec(self, spk):
         try:
@@ -194,7 +196,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         except Exception as e:
             logger.error(f"Ref Error: {spk}, {e}")
             print((f"Ref Error: {spk}, {e}"))
-            ref = torch.zeros(513,500)
+            return None
         return ref
     
     
@@ -210,11 +212,9 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             f0 /= 2100
         return f0
     
-    def get_energy(self, filename):
-        energy = torch.load(filename.replace(".wav", f".{self.energy_suffix}"))
-        if self.quantize_energy:
-            energy = torch.bucketize(energy, self.quantize_energy_bond)
-        return energy
+    def get_aux_input(self, filename):
+        aux = torch.load(filename.replace("/wave/", "/feature/hubert/").replace(".flac", ".hubert"))
+        return aux
     
     def get_audio(self, filename):
         audio_norm, sampling_rate = torchaudio.load(filename)
@@ -228,21 +228,28 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             if self.spec_suffix == "linear":
                 spec_filename = filename.replace("/wave/", "/feature/linear_spec/").replace(".flac", f".{self.spec_suffix}")
                 if os.path.exists(spec_filename):
-                    spec = torch.load(spec_filename)
+                    spec = torch.load(spec_filename, map_location='cpu')
                     assert spec.shape[0] == 513
                 else:
                     raise FileNotFoundError
             elif self.spec_suffix == "mel":
                 spec_filename = filename.replace("/wave/", "/feature/mel_spec/").replace(".flac", f".{self.spec_suffix}")
                 if os.path.exists(spec_filename):
-                    spec = torch.load(spec_filename)
+                    spec = torch.load(spec_filename, map_location='cpu')
                     assert spec.shape[0] == 100
                 else:
                     raise FileNotFoundError
-            elif self.spec_suffix == "codec":
+            elif self.spec_suffix == "demb":
                 spec_filename = filename.replace("/wave/", "/feature/codec_24/").replace(".flac", f".{self.spec_suffix}")
                 if os.path.exists(spec_filename):
-                    spec = torch.load(spec_filename).squeeze(0)
+                    spec = torch.load(spec_filename, map_location='cpu').squeeze(0)
+                    assert spec.shape[0] == 128
+                else:
+                    raise FileNotFoundError
+            elif self.spec_suffix == "cemb":
+                spec_filename = filename.replace("/wave/", "/feature/codec_24/").replace(".flac", f".{self.spec_suffix}")
+                if os.path.exists(spec_filename):
+                    spec = torch.load(spec_filename, map_location='cpu')
                     assert spec.shape[0] == 128
                 else:
                     raise FileNotFoundError
@@ -330,17 +337,14 @@ class TextAudioSpeakerCollate():
         else:
             f0_padded = torch.FloatTensor(len(batch), max_spec_len)
             
-        if self.quantize_energy:
-            energy_padded = torch.LongTensor(len(batch), max_spec_len)
-        else:
-            energy_padded = torch.FloatTensor(len(batch), max_spec_len)
 
+        aux_padded = torch.FloatTensor(len(batch), batch[0][5].size(0), max_spec_len)
         text_padded.zero_()
         spec_padded.zero_()
         wav_padded.zero_()
         ref_padded.zero_()
         f0_padded.zero_()
-        energy_padded.zero_()
+        aux_padded.zero_()
         
         for i in range(len(ids_sorted_decreasing)):
             row = batch[ids_sorted_decreasing[i]]
@@ -367,11 +371,13 @@ class TextAudioSpeakerCollate():
                 f0 = row[4]
                 f0_padded[i, :f0.size(0)] = f0
             
-            energy = row[5]
-            energy_padded[i, :energy.size(0)] = energy
+            aux = row[5]
+
+            aux_padded[i, :, :aux.size(1)] = aux
+            
 
 
-        return text_padded, text_lengths, spec_padded, spec_lengths, wav_padded, wav_lengths, ref_padded, ref_lengths, f0_padded, energy_padded
+        return text_padded, text_lengths, spec_padded, spec_lengths, wav_padded, wav_lengths, ref_padded, ref_lengths, f0_padded, aux_padded
 
 
 class DistributedBucketSampler(torch.utils.data.distributed.DistributedSampler):

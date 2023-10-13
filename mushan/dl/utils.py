@@ -179,6 +179,7 @@ def vits_latest_checkpoint_path(checkpoint_path):
 
 def tacotron_latest_checkpoint_path(checkpoint_path):
     G_list = glob.glob(checkpoint_path + "/G_*")
+    print(G_list)
     G_list = [i.split("G_")[-1] for i in G_list]
 
     G_list.sort(key=lambda x:int(x.split(".")[0]))
@@ -306,7 +307,7 @@ def get_hparams(init=True):
             logger.info(config.checkpoint.g)
             logger.info(config.checkpoint.d)
             
-        elif args.model == 'tacotron' or args.model == 'grad':
+        elif args.model == 'tacotron' or args.model == 'grad' or args.model == 'como':
             newest_check_point = tacotron_latest_checkpoint_path(checkpoint_path)
             config.train.model_dir = f"{checkpoint_path}/"
             config.checkpoint.g = f"{checkpoint_path}/G_{newest_check_point}"
@@ -322,6 +323,7 @@ def get_hparams(init=True):
         config.train.model_dir = f"./logs/test/"
     else:
         config.train.model_dir = f"./logs/{config.train.logger_folder}/{config.train.tags}_{datetime.now().strftime('%m_%d_%H_%M')}/"
+
     
     if not os.path.exists(config.train.model_dir):
         os.makedirs(config.train.model_dir)
