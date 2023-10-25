@@ -60,7 +60,14 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         self.need_text = 'text' in config.data.data_list
         self.need_vc = 'vc' in config.data.data_list
         self.need_f0 = 'f0' in config.data.data_list
-        self.aux_input = 'hu' in config.data.data_list
+        
+        if 'hu' in config.data.data_list:
+            self.aux_input = 'hu'
+        elif 'whisper' in config.data.data_list:
+            self.aux_input = 'whisper'
+        else:
+            self.aux_input = ''
+            
         self.need_mel = 'mel' in config.data.data_list
             
         self.text_cleaners = config.data.text_cleaners
@@ -177,8 +184,17 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         else:
             f0 = torch.zeros(1)
             
-        if self.aux_input:
-            aux = self.get_aux_input(audiopath)
+        if self.aux_input == 'hu':
+            aux = self.get_hu(audiopath)
+            assert spec.shape[-1] == aux.shape[-1], f"spec.shape={spec.shape}, aux.shape={aux.shape}"
+        elif self.aux_input == 'whisper':
+            aux = self.get_whisper(audiopath)
+            target_len = spec.shape[-1]
+            
+            # Align with spectrogram
+            aux = torch.nn.functional.interpolate(aux.unsqueeze(0), 
+                                                  size=target_len, 
+                                                  mode='linear').squeeze(0)
             assert spec.shape[-1] == aux.shape[-1], f"spec.shape={spec.shape}, aux.shape={aux.shape}"
         else:
             aux = torch.zeros(1,1)
@@ -212,8 +228,12 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             f0 /= 2100
         return f0
     
-    def get_aux_input(self, filename):
+    def get_hu(self, filename):
         aux = torch.load(filename.replace("/wave/", "/feature/hubert/").replace(".flac", ".hubert"))
+        return aux
+    
+    def get_whisper(self, filename):
+        aux = torch.load(filename.replace("/wave/", "/feature/whisper/").replace(".flac", ".enc"))
         return aux
     
     def get_audio(self, filename):

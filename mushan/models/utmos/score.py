@@ -12,7 +12,7 @@ from pathlib import Path
 import os
 
 def load_ssl_model(cp_path):
-    ssl_model_type = cp_path.split("/")[-1]
+    ssl_model_type = "wav2vec_small.pt"
     wavlm =  "WavLM" in ssl_model_type
     if wavlm:
         checkpoint = torch.load(cp_path)
@@ -207,7 +207,7 @@ class BaselineLightningModule(pl.LightningModule):
     
     def construct_model(self):
         self.feature_extractors = nn.ModuleList([
-            load_ssl_model(cp_path='wav2vec_small.pt'),
+            load_ssl_model(cp_path=str(Path(__file__).resolve().parent.joinpath("wav2vec"))),
             DomainEmbedding(3,128),
         ])
         output_dim = sum([ feature_extractor.get_output_dim() for feature_extractor in self.feature_extractors])
@@ -279,10 +279,15 @@ class Score:
         self.ckpt_path = str(Path(__file__).resolve().parent.joinpath("g_05000000"))
         if not os.path.exists(self.ckpt_path):
             gdown.download(url="https://drive.google.com/file/d/1XiLi8V4t40gde1oeL0uh7CTIiqupNJHm/view?usp=drive_link", output=self.ckpt_path, quiet=False, fuzzy=True)
+            
+        self.wav2vec_path = str(Path(__file__).resolve().parent.joinpath("wav2vec"))
+        if not os.path.exists(self.wav2vec_path):
+            gdown.download(url="https://drive.google.com/file/d/1Vi3FnK4kOijiFwy_SJXjarAXhDNwpIto/view?usp=share_link", output=self.wav2vec_path, quiet=False, fuzzy=True)
+
         
         self.device = device
         self.model = BaselineLightningModule.load_from_checkpoint(
-            self.ckpt_path, map_location=self.device).eval().to(self.device)
+            self.ckpt_path,  map_location=self.device).eval().to(self.device)
         self.in_sr = input_sample_rate
         self.resampler = torchaudio.transforms.Resample(
             orig_freq=input_sample_rate,

@@ -28,6 +28,13 @@ def load_checkpoint(checkpoint_path, model, optimizer=None, slience=False, parti
     
     assert os.path.isfile(checkpoint_path)
     checkpoint_dict = torch.load(checkpoint_path, map_location='cpu')
+    
+    # Backward compatibility
+    if 'global_step' in checkpoint_dict.keys():
+        global_step = checkpoint_dict['global_step']
+    else:
+        global_step = -1
+        
     iteration = checkpoint_dict['iteration']
     learning_rate = checkpoint_dict['learning_rate']
     if optimizer is not None:
@@ -55,7 +62,7 @@ def load_checkpoint(checkpoint_path, model, optimizer=None, slience=False, parti
         model.load_state_dict(new_state_dict)
     if not slience:
         logger.info("Loaded checkpoint '{}' (iteration {}) : suc {}, fail {}".format(checkpoint_path, iteration, suc, fail))
-    return model, optimizer, learning_rate, iteration
+    return model, optimizer, learning_rate, iteration, global_step
 
      
 def load_for_tine_tune(uni_checkpoint_path, model):
@@ -123,7 +130,12 @@ def load_tine_tune(ft_checkpoint_path, uni_checkpoint_path, model):
         model.load_state_dict(new_state_dict, strict=False)
 
 
-def save_checkpoint(model, optimizer, learning_rate, iteration, checkpoint_path):
+def save_checkpoint(model, 
+                    optimizer, 
+                    learning_rate = 1e-4, 
+                    iteration = 0, 
+                    global_step = 0, 
+                    checkpoint_path = "./logs/temp.pk"):
     logger.info("Saving model and optimizer state at iteration {} to {}".format(
         iteration, checkpoint_path))
     if hasattr(model, 'module'):
@@ -132,6 +144,7 @@ def save_checkpoint(model, optimizer, learning_rate, iteration, checkpoint_path)
         state_dict = model.state_dict()
     torch.save({'model': state_dict,
                 'iteration': iteration,
+                'global_step': global_step,
                 'optimizer': optimizer.state_dict(),
                 'learning_rate': learning_rate}, checkpoint_path)
     
@@ -307,7 +320,7 @@ def get_hparams(init=True):
             logger.info(config.checkpoint.g)
             logger.info(config.checkpoint.d)
             
-        elif args.model == 'tacotron' or args.model == 'grad' or args.model == 'como':
+        elif args.model == 'tacotron' or args.model == 'grad' or args.model == 'como' or args.model == 'edm':
             newest_check_point = tacotron_latest_checkpoint_path(checkpoint_path)
             config.train.model_dir = f"{checkpoint_path}/"
             config.checkpoint.g = f"{checkpoint_path}/G_{newest_check_point}"
