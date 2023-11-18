@@ -4,11 +4,18 @@ import os
 import pickle
 import lilcom
 import lzma
+from dotmap import DotMap
+import tomli
 
 def from_pickle(filename):
     with open(filename, "rb") as f:
         data = pickle.load(f)
     return data
+
+def from_toml(filename):
+    with open(filename, "rb") as f:
+        config = DotMap(tomli.load(f))
+    return config
 
 def from_text(filename):
     with open(filename, "r") as f:

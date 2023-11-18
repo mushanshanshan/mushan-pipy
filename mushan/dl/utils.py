@@ -136,17 +136,24 @@ def save_checkpoint(model,
                     iteration = 0, 
                     global_step = 0, 
                     checkpoint_path = "./logs/temp.pk"):
-    logger.info("Saving model and optimizer state at iteration {} to {}".format(
-        iteration, checkpoint_path))
     if hasattr(model, 'module'):
         state_dict = model.module.state_dict()
     else:
         state_dict = model.state_dict()
+        
+    if optimizer != None:
+        optsd = optimizer.state_dict()
+    else:
+        optsd = None
+        
     torch.save({'model': state_dict,
                 'iteration': iteration,
                 'global_step': global_step,
-                'optimizer': optimizer.state_dict(),
+                'optimizer': optsd,
                 'learning_rate': learning_rate}, checkpoint_path)
+    
+    logger.info("Saving model and optimizer state at iteration {} to {}".format(
+        iteration, checkpoint_path))
     
 def save_fine_tune(model, checkpoint_path):
     fine_tune = OrderedDict()
@@ -192,8 +199,21 @@ def vits_latest_checkpoint_path(checkpoint_path):
 
 def tacotron_latest_checkpoint_path(checkpoint_path):
     G_list = glob.glob(checkpoint_path + "/G_*")
-    print(G_list)
     G_list = [i.split("G_")[-1] for i in G_list]
+
+    G_list.sort(key=lambda x:int(x.split(".")[0]))
+    return G_list[-1]
+
+def torch_latest_checkpoint_path(checkpoint_path):
+    G_list = glob.glob(checkpoint_path + "/C_*")
+    G_list = [i.split("C_")[-1] for i in G_list]
+
+    G_list.sort(key=lambda x:int(x.split(".")[0]))
+    return G_list[-1]
+
+def uni_latest_checkpoint_path(checkpoint_path, prefix):
+    G_list = glob.glob(checkpoint_path + f"/{prefix}_*")
+    G_list = [i.split(f"{prefix}_")[-1] for i in G_list]
 
     G_list.sort(key=lambda x:int(x.split(".")[0]))
     return G_list[-1]
@@ -303,33 +323,54 @@ def get_hparams(init=True):
     config.train.test = args.test_mode or args.tag == 'test'
     
     if args.continue_train:
-        logger.info(f"Continuing training")
         checkpoint_path = os.path.dirname(config_file)
-        print(checkpoint_path)
-        if args.model == 'vits':
-            newest_check_point = vits_latest_checkpoint_path(checkpoint_path)
+        if isinstance(config.train.ckp_prefix, str):
+            newest_check_point = uni_latest_checkpoint_path(checkpoint_path, config.train.ckp_prefix)
             config.train.model_dir = f"{checkpoint_path}/"
-            config.checkpoint.g = f"{checkpoint_path}/G_{newest_check_point}"
-            config.checkpoint.d = f"{checkpoint_path}/D_{newest_check_point}"
+            config.checkpoint.g = f"{checkpoint_path}/{config.train.ckp_prefix}_{newest_check_point}"
             config.checkpoint.load_checkpoint = True
             
-            assert os.path.exists(config.checkpoint.g), "Checkpoint G does not exist"
-            assert os.path.exists(config.checkpoint.d), "Checkpoint D does not exist"
+            assert os.path.exists(config.checkpoint.g), f"Checkpoint {config.train.ckp_prefix} does not exist"
             
             logger.info(f"Using checkpoint:")
             logger.info(config.checkpoint.g)
-            logger.info(config.checkpoint.d)
-            
-        elif args.model == 'tacotron' or args.model == 'grad' or args.model == 'como' or args.model == 'edm':
-            newest_check_point = tacotron_latest_checkpoint_path(checkpoint_path)
-            config.train.model_dir = f"{checkpoint_path}/"
-            config.checkpoint.g = f"{checkpoint_path}/G_{newest_check_point}"
-            config.checkpoint.load_checkpoint = True
-            
-            assert os.path.exists(config.checkpoint.g), "Checkpoint G does not exist"
-            
-            logger.info(f"Using checkpoint:")
-            logger.info(config.checkpoint.g)
+        
+        else:
+            if args.model == 'vits':
+                newest_check_point = vits_latest_checkpoint_path(checkpoint_path)
+                config.train.model_dir = f"{checkpoint_path}/"
+                config.checkpoint.g = f"{checkpoint_path}/G_{newest_check_point}"
+                config.checkpoint.d = f"{checkpoint_path}/D_{newest_check_point}"
+                config.checkpoint.load_checkpoint = True
+                
+                assert os.path.exists(config.checkpoint.g), "Checkpoint G does not exist"
+                assert os.path.exists(config.checkpoint.d), "Checkpoint D does not exist"
+                
+                logger.info(f"Using checkpoint:")
+                logger.info(config.checkpoint.g)
+                logger.info(config.checkpoint.d)
+                
+            elif args.model == 'bigv':
+                newest_check_point = torch_latest_checkpoint_path(checkpoint_path)
+                config.train.model_dir = f"{checkpoint_path}/"
+                config.checkpoint.g = f"{checkpoint_path}/C_{newest_check_point}"
+                config.checkpoint.load_checkpoint = True
+                
+                assert os.path.exists(config.checkpoint.g), "Checkpoint C does not exist"
+                
+                logger.info(f"Using checkpoint:")
+                logger.info(config.checkpoint.g)
+            else:
+                newest_check_point = tacotron_latest_checkpoint_path(checkpoint_path)
+                config.train.model_dir = f"{checkpoint_path}/"
+                config.checkpoint.g = f"{checkpoint_path}/G_{newest_check_point}"
+                config.checkpoint.load_checkpoint = True
+                
+                assert os.path.exists(config.checkpoint.g), "Checkpoint G does not exist"
+                
+                logger.info(f"Using checkpoint:")
+                logger.info(config.checkpoint.g)
+
 
             
     elif config.train.test:
@@ -338,8 +379,11 @@ def get_hparams(init=True):
         config.train.model_dir = f"./logs/{config.train.logger_folder}/{config.train.tags}_{datetime.now().strftime('%m_%d_%H_%M')}/"
 
     
-    if not os.path.exists(config.train.model_dir):
+    try:
         os.makedirs(config.train.model_dir)
+    except:
+        pass
+        
     try:
         shutil.copyfile(config_file, f"{config.train.model_dir}config.toml")
     except shutil.SameFileError:
@@ -408,11 +452,30 @@ def get_logger(model_dir, filename="train.log"):
 
 def oc_mem(size = 24000, wait_time = 5, device = 0):
     logger.info(f"Occupy GPU mem with size = {size}, waiting for {wait_time} seconds.")
-    x = torch.zeros(256,1024,int(size * 0.8),device=f'cuda:{device}')
+    x = torch.zeros(256,1024,int(size * 0.9),device=f'cuda:{device}')
     time.sleep(wait_time)
     del x
     time.sleep(wait_time)
     logger.info(f"Occupied GPU mem released.")
+    
+class TrainingState():
+    def __init__(self):
+        self.state = {}
+        
+    def set(self, key, value):
+        self.state[key] = value
+    
+    def get(self, key):
+        try:
+            return self.state[key]
+        except:
+            return None
+    
+    def state_dict(self):
+        return self.state
+    
+    def load_state_dict(self, state_dict):
+        self.state = state_dict
 
 class HParams():
     def __init__(self, **kwargs):

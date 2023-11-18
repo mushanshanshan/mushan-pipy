@@ -43,7 +43,16 @@ def spectral_de_normalize_torch(magnitudes):
 mel_basis = {}
 hann_window = {}
 
-def mel_spectrogram(y, n_fft, num_mels, sampling_rate, hop_size, win_size, fmin, fmax, center=False):
+def mel_spectrogram(y, 
+                    n_fft = 1024, 
+                    num_mels = 100, 
+                    sampling_rate = 24000, 
+                    hop_size = 256, 
+                    win_size = 1024, 
+                    fmin = 0, 
+                    fmax = 12000, 
+                    center=False):
+    
     if torch.min(y) < -1.:
         print('min value is ', torch.min(y))
     if torch.max(y) > 1.:
@@ -70,7 +79,14 @@ def mel_spectrogram(y, n_fft, num_mels, sampling_rate, hop_size, win_size, fmin,
     return spec
 
 
-def bigv_mel(audio):
+def bigv_mel(audio,
+            n_fft = 1024, 
+            num_mels = 100, 
+            sampling_rate = 24000, 
+            hop_size = 256, 
+            win_size = 1024, 
+            fmin = 0, 
+            fmax = 12000, ):
     if isinstance(audio, str):
         audio, sampling_rate = torchaudio.load(audio)
     else:
@@ -80,7 +96,7 @@ def bigv_mel(audio):
     audio = normalize(audio) * 0.95
     audio = torch.FloatTensor(audio).cpu()
     audio = audio.unsqueeze(0)
-    mel = mel_spectrogram(audio, 1024, 100, 24000, 256, 1024, 0, 12000, center=False).squeeze(0).cpu()
+    mel = mel_spectrogram(audio, n_fft, num_mels, sampling_rate, hop_size, win_size, fmin, fmax, center=False).squeeze(0).cpu()
     return mel
 
 

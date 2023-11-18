@@ -19,6 +19,7 @@ mushan/audio/encodrc.py
 mushan/audio/lhotse.py
 mushan/audio/mcd.py
 mushan/audio/plot.py
+mushan/audio/simple_dataset.py
 mushan/audio/spec_process.py
 mushan/dl/__init__.py
 mushan/dl/activation.py
@@ -39,6 +40,8 @@ mushan/models/bigv/utils.py
 mushan/models/diffusion/__init__.py
 mushan/models/diffusion/ddim.py
 mushan/models/diffusion/ddpm.py
+mushan/models/ema/__init__.py
+mushan/models/ema/ema.py
 mushan/models/encodec/__init__.py
 mushan/models/encodec/__main__.py
 mushan/models/encodec/balancer.py
@@ -58,6 +61,11 @@ mushan/models/encodec/quantization/__init__.py
 mushan/models/encodec/quantization/ac.py
 mushan/models/encodec/quantization/core_vq.py
 mushan/models/encodec/quantization/vq.py
+mushan/models/modules/__init__.py
+mushan/models/modules/base.py
+mushan/models/modules/diffsinger_decoder.py
+mushan/models/modules/gard_tts_decoder.py
+mushan/models/modules/reflow.py
 mushan/models/speaker_encoder/EPACA_TDNN.py
 mushan/models/speaker_encoder/__init__.py
 mushan/models/utmos/__init__.py

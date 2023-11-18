@@ -232,6 +232,14 @@ class EncodecModel(nn.Module):
         emb = self.idx_to_emb(frame)
         return emb
     
+    def wavfile_to_frame_emb(self, wav) -> torch.Tensor:
+        wav, sr = torchaudio.load(wav)
+        wav = wav.to(next(self.encoder.parameters()).device)
+        wav = self.convert_audio(wav, sr, self.sample_rate, self.channels).unsqueeze(0)
+        frame = self.encode(wav)[0][0]
+        emb = self.idx_to_emb(frame)
+        return frame, emb
+    
     def wavfile_to_cont_emb(self, wav) -> torch.Tensor:
         wav, sr = torchaudio.load(wav)
         wav = wav.to(next(self.encoder.parameters()).device)

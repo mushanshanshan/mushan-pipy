@@ -15,7 +15,7 @@ EMAIL = "wwd137669793@gmail.com"
 URL = "None"
 LICENSE = "None"
 DESCRIPTION = "Personal toolkit."
-VERSION = "0.0.13"
+VERSION = "0.0.14"
 
 if sys.version_info < (3, 6, 0):
     raise RuntimeError(f"{NAME} requires Python >=3.6.0, but yours is {sys.version}!")

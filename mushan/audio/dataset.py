@@ -7,12 +7,25 @@ import numpy as np
 import torch
 import torch.utils.data
 import torchaudio
+import copy
 from collections import defaultdict
 from loguru import logger
+from mushan.io import from_pickle
 from mushan.text.eng.front_end import Frontend as ENFrontend
 from mushan.text.chs.front_end import Frontend as CNFrontend
+from mushan.models.bigv.utils import bigv_mel
 
+class TorchStandardScaler:
+    def fit(self, x):
+        self.mean = x.mean(0, keepdim=True)
+        self.std = x.std(0, keepdim=True)
+        assert (self.std != 0).all()
+        
+    def normalize(self, x):
+        return (x - self.mean) / self.std
 
+    def reverse_normalize(self, x):
+        return x * self.std + self.mean
     
 
 def load_filepaths_and_text(filename, split="|"):
@@ -28,9 +41,12 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         3) computes spectrograms from audio files.
     """
 
-    def __init__(self, config, tag='train'):
+    def __init__(self, config, optinal = {}, tag='train', debug = False):
         self.audiopaths_sid_text = []
         self.rank = config.dist.rank
+        self.config = config
+        self.debug = debug
+        self.optinal = optinal
         
         if tag == 'train':
             for i in config.train.train_filelists:
@@ -52,21 +68,37 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
                     logger.info(f"Added train file : {i}, length : {len(temp)}")
         
         self.ref_dict = defaultdict(list)
-
         
-        self.need_audio = 'audio' in config.data.data_list
-        self.need_spec = 'spec' in config.data.data_list
-        self.need_ref = 'ref' in config.data.data_list
+        self.audio_type = ''
+        for d in config.data.data_list:
+            if 'audio' in d:
+                if self.audio_type != "": raise TypeError
+                self.audio_type = d
+        
+        self.spec_type = ''
+        for d in config.data.data_list:
+            if 'spec' in d:
+                if self.spec_type != "": raise TypeError
+                self.spec_type = d
+        
+        self.ref_type = '' 
+        
+        for d in config.data.data_list:
+            if 'ref' in d:
+                if self.ref_type != "": raise TypeError
+                self.ref_type = d
+            
         self.need_text = 'text' in config.data.data_list
         self.need_vc = 'vc' in config.data.data_list
         self.need_f0 = 'f0' in config.data.data_list
         
-        if 'hu' in config.data.data_list:
-            self.aux_input = 'hu'
-        elif 'whisper' in config.data.data_list:
-            self.aux_input = 'whisper'
-        else:
-            self.aux_input = ''
+        self.aux_type = ''
+        for d in config.data.data_list:
+            if 'aux' in d:
+                if self.aux_type != "": raise TypeError
+                self.aux_type = d
+                
+        self.concat = (config.data.concat == True)
             
         self.need_mel = 'mel' in config.data.data_list
             
@@ -105,15 +137,105 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             self.frontend = ENFrontend()
             
         self.symbols_len = self.frontend.symbols_len
-        
-        # if tag == 'train' and config.train.test:
-        #     random.shuffle(self.audiopaths_sid_text)
-        #     self.audiopaths_sid_text = random.sample(self.audiopaths_sid_text, 256)
-        
-        self._filter()
-        random.seed(1234)
-        
 
+
+        if 'norm' in self.spec_type:
+            if 'mel' in self.spec_type:
+                self.spec_norm = from_pickle("/home/mushan/data/feature/mel_spec/norm.pk")
+                if self.rank == 0:
+                    logger.info(f"Using mel spec normalization.")
+            elif 'codec' in self.spec_type:
+                self.spec_norm = from_pickle("/home/mushan/data/feature/codec/norm.pk")
+                if self.rank == 0:
+                    logger.info(f"Using codec normalization.")
+            elif 'c-codec' in self.spec_type:
+                self.spec_norm = from_pickle("/home/mushan/data/feature/codec/c-norm.pk")
+                if self.rank == 0:
+                    logger.info(f"Using codec normalization.")
+                
+                
+        if 'norm' in self.ref_type:
+            if 'mel' in self.ref_type:
+                self.ref_norm = from_pickle("/home/mushan/data/feature/mel_spec/norm.pk")
+                if self.rank == 0:
+                    logger.info(f"Using ref mel spec normalization.")
+            elif 'codec' in self.ref_type:
+                self.ref_norm = from_pickle("/home/mushan/data/feature/codec/norm.pk")
+                if self.rank == 0:
+                    logger.info(f"Using ref codec normalization.")
+            elif 'c-codec' in self.spec_type:
+                self.spec_norm = from_pickle("/home/mushan/data/feature/codec/c-norm.pk")
+                if self.rank == 0:
+                    logger.info(f"Using res codec normalization.")
+        
+        
+        if self.concat:
+            self._concat_filter()
+        else:
+            self._filter()
+            
+        random.seed(1234)
+        random.shuffle(self.audiopaths_sid_text)
+        
+    def _concat_filter(self, min = 7, max = 10):
+        
+        def create_balanced_sublists(input_data, min = 7, max = 10):
+
+            random.shuffle(input_data)
+            temp_data = [[[],0] for i in range(len(input_data))]
+            output_data = []
+
+            for item in input_data:
+                path, length = item
+
+                for i in range(len(temp_data)):
+                    if temp_data[i][1] + length < max:
+                        temp_data[i][0].append(path)
+                        temp_data[i][1] += length
+                        break
+
+            for t in temp_data:
+                if t[1] > min:
+                    output_data.append(t)
+            return output_data
+        
+        concat_audiopaths_sid_text_new = []
+        concat_audio_lengths = []
+        concat_text_lengths = []
+        missing_file = []
+        audiopaths_sid_text_new = []
+        speaker_dict = defaultdict(list)
+        pho_dict = {}
+        counr_after_concat = 0
+
+        for i in tqdm(range(len(self.audiopaths_sid_text)), disable=self.rank != 0):
+            audiopath, spk, dur, ori_text, pho = self.audiopaths_sid_text[i]
+            dur = float(dur)
+            if dur > self.min_audio_len:
+                self.ref_dict[spk].append(audiopath)
+            speaker_dict[spk].append([audiopath, dur])
+            pho_dict[audiopath] = pho[:-1]
+        
+        if self.rank == 0 and len(missing_file) > 0:
+            logger.error(f"Missing data index: {missing_file}")
+            
+        for spk, v in speaker_dict.items():
+            _cat = create_balanced_sublists(v, min, max)
+            for _c in _cat:
+                concat_audiopaths_sid_text_new.append([_c[0], spk, _c[1], "", "$".join([pho_dict[i][:-1] if pho_dict[i][-1] == '.' else pho_dict[i] for i in _c[0]])])
+                counr_after_concat += len(_c[0])
+                
+        if self.rank == 0:
+            logger.info(f"Using speech concat:")
+            logger.info(f"Total speech {len(self.audiopaths_sid_text)}, After coant: {counr_after_concat}")
+            
+        self.audiopaths_sid_text = concat_audiopaths_sid_text_new
+        self.audio_lengths = [i[2] for i in concat_audiopaths_sid_text_new]
+        self.text_lengths = [len(i[-1]) for i in concat_audiopaths_sid_text_new]
+        
+        if self.rank == 0:
+            logger.info(f"Avaliable data length: {len(self.audiopaths_sid_text)}")
+        
     def _filter(self):
         """
         Filter text & store spec lengths
@@ -126,8 +248,9 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         audio_lengths = []
         text_lengths = []
         missing_file = []
-
-        logger.info(f"Rank {self.rank} start processing filelists...")
+        
+        if self.rank == 0:
+            logger.info(f"Rank {self.rank} start processing filelists...")
         for i in tqdm(range(len(self.audiopaths_sid_text)), disable=self.rank != 0):
             try:
                 audiopath, spk, dur, ori_text, pho = self.audiopaths_sid_text[i]
@@ -142,28 +265,62 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
                 print(e)
                 # exit(1)
         
-        if os.environ['PYTORCH_RANK'] == '0' and len(missing_file) > 0:
+        if self.rank == 0 and len(missing_file) > 0:
             logger.error(f"Missing data index: {missing_file}")
         self.audiopaths_sid_text = audiopaths_sid_text_new
         self.audio_lengths = audio_lengths
         self.text_lengths = text_lengths
         if self.rank == 0:
             logger.info(f"Avaliable data length: {len(self.audiopaths_sid_text)}")
-
+            
     def get_audio_text_speaker_pair(self, audiopath_sid_text):
         # separate filename, speaker_id and text
-        audiopath, spk,  dur, ori_text, text = audiopath_sid_text
+        audiopath, spk, dur, ori_text, text = audiopath_sid_text
         #print(audiopath)
         
-        if self.need_audio:
+        if self.audio_type != '':
             wav = self.get_audio(audiopath)
         else:
             wav = torch.zeros(1,5)
             
-        if self.need_spec:
-            spec = self.get_spec(audiopath)
-        else:
+        if self.audio_type == "norm_audio":
+            print('norm')
+            wav = self.wave_norm(wav)
+        
+        if "clip_wave" in self.optinal.keys():
+            wav, _ = self.clip_spec(wav, self.optinal['clip_wave'])
+            
+        if 'mel_spec' in self.spec_type:
+            if self.concat:
+                spec = self.cat_data(audiopath, self.get_mel_spec)
+            else:
+                spec = self.get_mel_spec(audiopath)
+        elif 'linear_spec' in self.spec_type:
+            spec = self.get_linear_spec(audiopath)
+        elif  'q_codec_spec' in self.spec_type:
+            if self.concat:
+                spec = self.cat_data(audiopath, self.get_q_codec)
+            else:
+                spec = self.get_q_codec(audiopath)
+        elif 'c_codec_spec' in self.spec_type:
+            if self.concat:
+                spec = self.cat_data(audiopath, self.get_q_codec)
+            else:
+                spec = self.get_c_codec(audiopath)
+        elif 'mel_bigv_online_spec' in self.spec_type:    
+            spec = self.get_bigv_mel(wav)
+        elif self.spec_type == '':
             spec = torch.zeros(1,1)
+        else:
+            raise NotImplemented
+        
+        if 'norm' in self.spec_type:
+            spec = self.spec_norm.normalize(spec) 
+            
+        if "clip_spec" in self.optinal.keys():
+            spec, tag = self.clip_spec(spec, self.optinal['clip_spec'])
+            if not tag:
+                logger.warning(f"Clip error: {audiopath}")
 
         
         if self.need_text:
@@ -171,12 +328,29 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         else:
             text = torch.zeros(1)
         
-        if self.need_ref:
-            ref = self.get_ref_spec(spk)
-            if ref == None:
-                ref = spec
+        if self.ref_type != "":
+            ref_path = self.get_ref_path(spk)
+            if ref_path == None: 
+                ref_path = audiopath
+            if 'mel_ref' in self.ref_type:
+                ref = self.get_mel_spec(ref_path)
+            elif 'q_codec_ref' in self.ref_type:
+                ref = self.get_q_codec(ref_path)
+            elif 'c_codec_ref' in self.ref_type:
+                ref = self.get_c_codec(ref_path)
+            elif 'copy_ref' in self.ref_type:
+                ref = spec.clone()
+            else:
+                raise NotImplemented
         else:
             ref = torch.zeros((1,1))
+        
+        if 'copy_ref' not in self.ref_type:
+            ref = self.clip_ref(ref)
+            
+            
+        if 'norm' in self.ref_type:
+            ref = self.ref_norm.normalize(ref) 
             
         if self.need_f0:
             f0 = self.get_f0(audiopath)
@@ -184,11 +358,14 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         else:
             f0 = torch.zeros(1)
             
-        if self.aux_input == 'hu':
+        if self.aux_type == 'hu_aux':
             aux = self.get_hu(audiopath)
             assert spec.shape[-1] == aux.shape[-1], f"spec.shape={spec.shape}, aux.shape={aux.shape}"
-        elif self.aux_input == 'whisper':
-            aux = self.get_whisper(audiopath)
+        elif self.aux_type == 'whisper_aux':
+            if self.concat:
+                aux = self.cat_data(audiopath, self.get_whisper)
+            else:
+                aux = self.get_whisper(audiopath)
             target_len = spec.shape[-1]
             
             # Align with spectrogram
@@ -199,22 +376,85 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         else:
             aux = torch.zeros(1,1)
             
+        if "random_clip_spec_aux" in self.optinal.keys():
+            spec, aux = self.random_clip([spec, aux], self.optinal["random_clip_spec_aux"])
+            
+        if self.debug:
+            print(f"{audiopath}|{spk}|{ref_path}|{ori_text}")
+            
         return (text, spec, wav, ref, f0, aux)
+    
+    def wave_norm(self, wave):
+        wave -= wave.min()
+        wave /= wave.max()
+        return (2 * wave - 1) * 0.95
+    
+    def random_clip(self, inputs, target_length):
+        in_length = inputs[0].shape[-1]
+        re = []
+        for i in inputs:
+            assert i.shape[-1] == in_length
+            
+        start_idx = random.randint(0, in_length - target_length - 1)
+        for i in inputs:
+            re.append(i[:, start_idx: start_idx + target_length].clone())
+        
+        return re
+    
+    
+    def clip_ref(self, ref):
+        if ref.shape[-1] > 500:
+            start_idx = random.randint(0, ref.shape[1] - 500 - 1)
+            ref = ref[:, start_idx: start_idx + 500].clone()
+            return ref
+        return ref
+    
+    def get_bigv_mel(self, wave):
+        return bigv_mel(wave)
+    
+    def feature_normalization(self, feature, min_value, max_value):
+        feature = torch.clamp(feature, 
+                              min=min_value, 
+                              max=max_value)
+        feature = (feature - min_value) / (max_value - min_value) * 2 - 1
+        return feature
+        
+    def cat_data(self, filenames, fn):
+        feature = None
+        for file in filenames:
+            data = fn(file)
+            
+            if feature == None:
+                feature = data
+            else:
+                feature = torch.cat((feature, data), dim = -1)
+        return feature
 
-    def get_ref_spec(self, spk):
+    def get_ref_path(self, spk):
         try:
             ref = random.choice(self.ref_dict[spk])
-            ref = self.get_spec(ref)
-            if ref.shape[-1] > 500:
-                start = random.randint(0, ref.shape[-1] - 500)
-                end = start + 500
-                ref = ref[:,start:end]
         except Exception as e:
             logger.error(f"Ref Error: {spk}, {e}")
             print((f"Ref Error: {spk}, {e}"))
             return None
         return ref
     
+    
+    def clip_spec(self, spec, length):
+        if spec.shape[1] < length:
+            p = torch.zeros(spec.shape[0], length, dtype = spec.dtype, device = spec.device)
+            p[:, :spec.shape[1]] = spec
+            return p, False
+        else:
+            start_idx = random.randint(0, spec.shape[1] - length - 1)
+            spec = spec[:, start_idx: start_idx + length].clone()
+            return spec, True
+    
+    def min_clip_spec(self, spec):
+        target_len = int(spec.shape[1] / 93.75) * 90
+        start_idx = random.randint(0, spec.shape[1] - target_len - 1)
+        spec = spec[:, start_idx: start_idx + target_len].clone()
+        return spec
     
     def get_f0(self, filename):
         f0 = torch.load(filename.replace(".wav", f".{self.f0_suffix}"))
@@ -239,42 +479,41 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
     def get_audio(self, filename):
         audio_norm, sampling_rate = torchaudio.load(filename)
         return audio_norm
-
-    def get_spec(self, filename):
-
-        if ".wav" in filename:
-            spec_filename = filename.replace(".wav", ".linear")
+    
+    def get_q_codec(self, filename):
+        spec_filename = filename.replace("/wave/", "/feature/codec/").replace(".flac", f".qemb")
+        if os.path.exists(spec_filename):
+            spec = torch.load(spec_filename, map_location='cpu')
+            assert spec.shape[0] == 128
         else:
-            if self.spec_suffix == "linear":
-                spec_filename = filename.replace("/wave/", "/feature/linear_spec/").replace(".flac", f".{self.spec_suffix}")
-                if os.path.exists(spec_filename):
-                    spec = torch.load(spec_filename, map_location='cpu')
-                    assert spec.shape[0] == 513
-                else:
-                    raise FileNotFoundError
-            elif self.spec_suffix == "mel":
-                spec_filename = filename.replace("/wave/", "/feature/mel_spec/").replace(".flac", f".{self.spec_suffix}")
-                if os.path.exists(spec_filename):
-                    spec = torch.load(spec_filename, map_location='cpu')
-                    assert spec.shape[0] == 100
-                else:
-                    raise FileNotFoundError
-            elif self.spec_suffix == "demb":
-                spec_filename = filename.replace("/wave/", "/feature/codec_24/").replace(".flac", f".{self.spec_suffix}")
-                if os.path.exists(spec_filename):
-                    spec = torch.load(spec_filename, map_location='cpu').squeeze(0)
-                    assert spec.shape[0] == 128
-                else:
-                    raise FileNotFoundError
-            elif self.spec_suffix == "cemb":
-                spec_filename = filename.replace("/wave/", "/feature/codec_24/").replace(".flac", f".{self.spec_suffix}")
-                if os.path.exists(spec_filename):
-                    spec = torch.load(spec_filename, map_location='cpu')
-                    assert spec.shape[0] == 128
-                else:
-                    raise FileNotFoundError
-            else:
-                raise NotImplementedError
+            raise FileNotFoundError
+        return spec
+    
+    def get_c_codec(self, filename):
+        spec_filename = filename.replace("/wave/", "/feature/codec/").replace(".flac", f".cemb")
+        if os.path.exists(spec_filename):
+            spec = torch.load(spec_filename, map_location='cpu')
+            assert spec.shape[0] == 128
+        else:
+            raise FileNotFoundError
+        return spec
+    
+    def get_linear_spec(self, filename):
+        spec_filename = filename.replace("/wave/", "/feature/linear_spec/").replace(".flac", f".{self.spec_suffix}")
+        if os.path.exists(spec_filename):
+            spec = torch.load(spec_filename, map_location='cpu')
+            assert spec.shape[0] == 513
+        else:
+            raise FileNotFoundError
+        return spec
+    
+    def get_mel_spec(self, filename):
+        spec_filename = filename.replace("/wave/", "/feature/mel_spec/").replace(".flac", f".mel")
+        if os.path.exists(spec_filename):
+            spec = torch.load(spec_filename, map_location='cpu')
+            assert spec.shape[0] == 100
+        else:
+            raise FileNotFoundError
         return spec
 
     def get_text(self, text):
@@ -308,10 +547,10 @@ class TextAudioSpeakerCollate():
     """ Zero-pads model inputs and targets
     """
 
-    def __init__(self, config=None,return_ids=False, tacotron=False, div2=False):
+    def __init__(self, config=None, optional = {}, return_ids=False, tacotron=False):
         
         self.return_ids = return_ids
-        self.div2 = div2
+        self.optional = optional
         if config != None:
             self.quantize_f0 = config.data.quantize_f0
             self.quantize_energy = config.data.quantize_energy
@@ -334,12 +573,13 @@ class TextAudioSpeakerCollate():
 
         max_text_len = max([len(x[0]) for x in batch])
         max_spec_len = max([x[1].size(1) for x in batch])
+        
+        if "fix_len" in self.optional.keys():
+            _len = self.optional["fix_len"]
+            max_spec_len = _len * (max_spec_len // _len + 1)
+
         max_wav_len = max([x[2].size(1) for x in batch])
         max_ref_len = max([x[3].size(1) for x in batch])
-        
-        if self.div2:
-            while max_spec_len % 4 != 0:
-                max_spec_len += 1
 
         text_lengths = torch.LongTensor(len(batch))
         spec_lengths = torch.LongTensor(len(batch))
@@ -347,6 +587,7 @@ class TextAudioSpeakerCollate():
         ref_lengths = torch.LongTensor(len(batch))
 
         text_padded = torch.LongTensor(len(batch), max_text_len)
+        
         spec_padded = torch.FloatTensor(len(batch), batch[0][1].size(0), max_spec_len)
         wav_padded = torch.FloatTensor(len(batch), 1, max_wav_len)
         ref_padded = torch.FloatTensor(len(batch), batch[0][1].size(0), max_ref_len)
