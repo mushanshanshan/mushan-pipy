@@ -6,6 +6,7 @@ import random
 import numpy as np
 import torch
 import math
+from librosa.util import normalize
 import torch.utils.data
 import torchaudio
 from collections import defaultdict
@@ -120,15 +121,21 @@ class SimpleAudioSpecLoader(torch.utils.data.Dataset):
         #     wav, _ = self.clip_spec(wav, self.optinal['clip_wave'])
         # spec = bigv_mel(wav)
         
-        wav = torch.zeros(1,5)
+        wav = torch.zeros(1, 5)
         spec = self.get_mel_spec(audiopath)
         spec, _ = self.clip_spec(spec, self.optinal['clip_spec'])
             
         return wav, spec
     
-    def get_audio(self, filename):
-        audio_norm, sampling_rate = torchaudio.load(filename)
-        return audio_norm
+    def get_audio(self, filename, length = 16384):
+        audio, sampling_rate = torchaudio.load(filename)
+        audio = audio.numpy().squeeze(0)
+        audio = normalize(audio) * 0.95
+        audio = torch.FloatTensor(audio)
+        start_idx = random.randint(0, audio.shape[0] - length - 1)
+        audio = audio[start_idx: start_idx + length].clone()
+        audio = audio.unsqueeze(0)
+        return audio
     
 
     
@@ -150,10 +157,6 @@ class SimpleAudioSpecLoader(torch.utils.data.Dataset):
             start_idx = random.randint(0, spec.shape[1] - length - 1)
             spec = spec[:, start_idx: start_idx + length].clone()
             return spec, True
-
-    def get_sid(self, sid):
-        sid = torch.LongTensor([int(sid)])
-        return sid
 
     def __getitem__(self, index):
         return self.get_audio_text_speaker_pair(self.audiopaths_sid_text[self.loop_idx[index]])

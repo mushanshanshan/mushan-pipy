@@ -87,16 +87,22 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             if 'ref' in d:
                 if self.ref_type != "": raise TypeError
                 self.ref_type = d
-            
-        self.need_text = 'text' in config.data.data_list
+        
+        self.text_type = list(set(["text", "hubert"]).intersection(set(config.data.data_list)))
+        assert len(self.text_type) == 1
+        self.text_type = self.text_type[0]
+        
+        
         self.need_vc = 'vc' in config.data.data_list
         self.need_f0 = 'f0' in config.data.data_list
         
-        self.aux_type = ''
-        for d in config.data.data_list:
-            if 'aux' in d:
-                if self.aux_type != "": raise TypeError
-                self.aux_type = d
+        self.aux_type = list(set(["hu_dur", "whisper_aux"]).intersection(set(config.data.data_list)))
+        if len(self.aux_type) > 1:
+            logger.error("More than 1 aux_type")
+        elif len(self.aux_type) == 1:
+            self.aux_type = self.aux_type[0]
+        else:
+            self.aux_type = ""
                 
         self.concat = (config.data.concat == True)
             
@@ -323,8 +329,10 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
                 logger.warning(f"Clip error: {audiopath}")
 
         
-        if self.need_text:
+        if self.text_type == "text":
             text = self.get_text(text)
+        elif self.text_type == "hubert":
+            text = self.get_hu(audiopath)
         else:
             text = torch.zeros(1)
         
@@ -358,9 +366,9 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         else:
             f0 = torch.zeros(1)
             
-        if self.aux_type == 'hu_aux':
-            aux = self.get_hu(audiopath)
-            assert spec.shape[-1] == aux.shape[-1], f"spec.shape={spec.shape}, aux.shape={aux.shape}"
+        if self.aux_type == 'hu_dur':
+            text, aux = torch.unique_consecutive(text, return_counts=True)
+            aux = aux.unsqueeze(0)
         elif self.aux_type == 'whisper_aux':
             if self.concat:
                 aux = self.cat_data(audiopath, self.get_whisper)
@@ -457,7 +465,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         return spec
     
     def get_f0(self, filename):
-        f0 = torch.load(filename.replace(".wav", f".{self.f0_suffix}"))
+        f0 = torch.load(filename.replace(".wav", f".{self.f0_suffix}"), map_location=torch.device('cpu'))
         nan = f0.isnan()
         f0[nan] = 0
         if self.quantize_f0:
@@ -469,11 +477,11 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         return f0
     
     def get_hu(self, filename):
-        aux = torch.load(filename.replace("/wave/", "/feature/hubert/").replace(".flac", ".hubert"))
+        aux = torch.load(filename.replace("/wave/", "/feature/hubert/").replace(".flac", ".code"), map_location=torch.device('cpu'))
         return aux
     
     def get_whisper(self, filename):
-        aux = torch.load(filename.replace("/wave/", "/feature/whisper/").replace(".flac", ".enc"))
+        aux = torch.load(filename.replace("/wave/", "/feature/whisper/").replace(".flac", ".enc"), map_location=torch.device('cpu'))
         return aux
     
     def get_audio(self, filename):

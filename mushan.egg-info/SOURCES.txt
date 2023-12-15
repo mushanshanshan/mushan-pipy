@@ -15,6 +15,7 @@ mushan/audio/__init__.py
 mushan/audio/audio.py
 mushan/audio/data.py
 mushan/audio/dataset.py
+mushan/audio/dict_dataset.py
 mushan/audio/encodrc.py
 mushan/audio/lhotse.py
 mushan/audio/mcd.py
@@ -42,6 +43,7 @@ mushan/models/diffusion/ddim.py
 mushan/models/diffusion/ddpm.py
 mushan/models/ema/__init__.py
 mushan/models/ema/ema.py
+mushan/models/ema/emanew.py
 mushan/models/encodec/__init__.py
 mushan/models/encodec/__main__.py
 mushan/models/encodec/balancer.py
