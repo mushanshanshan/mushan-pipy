@@ -342,6 +342,8 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
                 ref_path = audiopath
             if 'mel_ref' in self.ref_type:
                 ref = self.get_mel_spec(ref_path)
+            elif 'linear_ref' in self.ref_type:
+                ref = self.get_linear_spec(ref_path)
             elif 'q_codec_ref' in self.ref_type:
                 ref = self.get_q_codec(ref_path)
             elif 'c_codec_ref' in self.ref_type:
@@ -598,7 +600,7 @@ class TextAudioSpeakerCollate():
         
         spec_padded = torch.FloatTensor(len(batch), batch[0][1].size(0), max_spec_len)
         wav_padded = torch.FloatTensor(len(batch), 1, max_wav_len)
-        ref_padded = torch.FloatTensor(len(batch), batch[0][1].size(0), max_ref_len)
+        ref_padded = torch.FloatTensor(len(batch), batch[0][3].size(0), max_ref_len)
         if self.quantize_f0:
             f0_padded = torch.LongTensor(len(batch), max_spec_len)
         elif self.tacotron:

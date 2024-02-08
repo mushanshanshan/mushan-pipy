@@ -88,17 +88,6 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         self.min_audio_len = config.data.min_audio_len
         self.max_audio_len = config.data.max_audio_len
         
-        self.spec_suffix = config.data.spec_suffix
-        self.f0_suffix = config.data.f0_suffix
-        self.energy_suffix = config.data.energy_suffix
-        
-        self.quantize_f0 = config.data.quantize_f0
-        self.quantize_f0_bond = torch.Tensor(config.bins.f0_log)
-        
-        self.quantize_energy = config.data.quantize_energy
-        self.quantize_energy_bond = torch.Tensor(config.bins.energy)
-        
-        
         self.dataset_lang_map = {
             'cmhq': 'english',
             'lib': 'english',
@@ -183,7 +172,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
     def get_hubert(self, audiopath_sid_text):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
         hu_filename = audiopath.replace("/wave/", "/feature/hubert/").replace(".flac", ".code")
-        assert os.path.exists(hu_filename)
+        assert os.path.exists(hu_filename), hu_filename
         
         hu = torch.load(hu_filename, map_location=torch.device('cpu'))
         hu, dur = torch.unique_consecutive(hu, return_counts=True)
@@ -205,18 +194,18 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
     def get_mel_spec(self, audiopath_sid_text):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
         spec_filename = audiopath.replace("/wave/", "/feature/mel_spec/").replace(".flac", f".mel")
-        assert os.path.exists(spec_filename)
+        assert os.path.exists(spec_filename), spec_filename
         
         spec = torch.load(spec_filename, map_location='cpu')
         return {"mel_spec": spec}
     
     def get_mel_ref(self, audiopath_sid_text):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
-        assert len(self.ref_dict[spk]) > 0
+        assert len(self.ref_dict[spk]) > 0, spk
 
         ref = random.choice(self.ref_dict[spk])
         spec_filename = ref.replace("/wave/", "/feature/mel_spec/").replace(".flac", f".mel")
-        assert os.path.exists(spec_filename)
+        assert os.path.exists(spec_filename), spec_filename
         
         spec = torch.load(spec_filename, map_location='cpu')
         return {"mel_ref": spec}
@@ -225,7 +214,31 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
         text_norm = self.frontend.pho_to_idx(text)
         return {"phoneme": text_norm}
+    
+    def get_wave_audio(self, audiopath_sid_text):
+        audiopath, spk, dur, ori_text, text = audiopath_sid_text
+        data, sr = torchaudio.load(audiopath)
+        return {"wave_audio": data.squeeze(0)}
+    
+    def get_linear_spec(self, audiopath_sid_text):
+        audiopath, spk, dur, ori_text, text = audiopath_sid_text
         
+        spec_filename = audiopath.replace("/wave/", "/feature/linear_spec/").replace(".flac", ".linear")
+        assert os.path.exists(spec_filename), spec_filename
+        
+        spec = torch.load(spec_filename, map_location='cpu')
+        return {"linear_spec": spec}
+    
+    def get_your_ref(self, audiopath_sid_text):
+        audiopath, spk, dur, ori_text, text = audiopath_sid_text
+        assert len(self.ref_dict[spk]) > 0, spk
+
+        ref = random.choice(self.ref_dict[spk])
+        spec_filename = ref.replace(".flac", ".emb")
+        assert os.path.exists(spec_filename), spec_filename
+        
+        spec = torch.load(spec_filename, map_location='cpu')
+        return {"your_ref": spec}
             
     def get_audio_text_speaker_pair(self, audiopath_sid_text):
         res = {}
@@ -265,6 +278,21 @@ class TextAudioSpeakerCollate():
             lang_idx[i] = row['language_idx']
 
         return {"language_idx": lang_idx}
+    
+    def get_linear_spec(self, batch, ids_sorted_decreasing):
+        max_spec_len = max([x['linear_spec'].size(1) for x in batch])
+        spec_lengths = torch.LongTensor(len(batch))
+        spec_padded = torch.FloatTensor(len(batch), batch[0]['linear_spec'].size(0), max_spec_len)
+        spec_padded.zero_()
+        
+        for i in range(len(ids_sorted_decreasing)):
+            row = batch[ids_sorted_decreasing[i]]
+            spec = row['linear_spec']
+            spec_padded[i, :, :spec.size(1)] = spec
+            spec_lengths[i] = spec.size(1)
+
+        return {"linear": spec_padded, 
+                "linear_length": spec_lengths}
         
         
     def get_mel_spec(self, batch, ids_sorted_decreasing):
@@ -330,12 +358,44 @@ class TextAudioSpeakerCollate():
 
         return {"phoneme": pho_padded, 
                 "phoneme_length": pho_lengths}
+    
+    def get_your_ref(self, batch, ids_sorted_decreasing):
+        max_ref_len = max([len(x['your_ref']) for x in batch])
+        ref_padded = torch.FloatTensor(len(batch), max_ref_len)
+        ref_padded.zero_()
+        
+        for i in range(len(ids_sorted_decreasing)):
+            row = batch[ids_sorted_decreasing[i]]
+            ref = row['your_ref']
+            ref_padded[i, :ref.size(0)] = ref
+
+        return {"your_ref": ref_padded}
+        
+    def get_wave_audio(self, batch, ids_sorted_decreasing):
+        max_wave_len = max([len(x['wave_audio']) for x in batch])
+        wave_lengths = torch.LongTensor(len(batch))
+        wave_padded = torch.FloatTensor(len(batch), max_wave_len)
+        wave_padded.zero_()
+        
+        for i in range(len(ids_sorted_decreasing)):
+            row = batch[ids_sorted_decreasing[i]]
+            wave = row['wave_audio']
+            wave_padded[i, :wave.size(0)] = wave
+            wave_lengths[i] = wave.size(0)
+
+        return {"wave_audio": wave_padded, 
+                "wave_audio_length": wave_lengths}
 
     def __call__(self, batch):
+        
+        for i in ['mel_spec', 'linear_spec']:
+            if i in batch[0].keys():
+                sort_key = i
+                break
 
         res = {}
         _, ids_sorted_decreasing = torch.sort(
-            torch.LongTensor([x['mel_spec'].size(1) for x in batch]),
+            torch.LongTensor([x[sort_key].size(1) for x in batch]),
             dim=0, descending=True)
         
         for key in self.data_list:
