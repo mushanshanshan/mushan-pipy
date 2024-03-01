@@ -27,6 +27,8 @@ mushan/dl/activation.py
 mushan/dl/commons.py
 mushan/dl/func.py
 mushan/dl/loss.py
+mushan/dl/optimizer.py
+mushan/dl/schedulers.py
 mushan/dl/utils.py
 mushan/io/__init__.py
 mushan/log/__init__.py
@@ -68,6 +70,7 @@ mushan/models/modules/base.py
 mushan/models/modules/diffsinger_decoder.py
 mushan/models/modules/gard_tts_decoder.py
 mushan/models/modules/reflow.py
+mushan/models/modules/scaled_adam.py
 mushan/models/speaker_encoder/EPACA_TDNN.py
 mushan/models/speaker_encoder/__init__.py
 mushan/models/utmos/__init__.py

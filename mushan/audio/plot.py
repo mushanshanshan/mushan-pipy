@@ -10,10 +10,10 @@ import numpy as np
 from pathlib import Path
 import torch
 
-def plot_detail_info_from_file(audio, pitc_scale=1, pitch_mel=True, durations=None, level='f'):
+def plot_detail_info_from_file(audio, sr=24000, pitc_scale=1, pitch_mel=True, durations=None, level='f'):
     import matplotlib.pylab as plt
     
-    naudio, spec, melspec, F0, eng = get_feature(audio)
+    naudio, spec, melspec, F0, eng = get_feature(audio, sr=sr, need_f0=True, need_energy=True, need_mel=True)
     
     fig, ax = plt.subplots(figsize=(20, 4))
     im = ax.imshow(melspec, aspect="auto", origin="lower",
@@ -38,11 +38,11 @@ def plot_detail_info_from_file(audio, pitc_scale=1, pitch_mel=True, durations=No
     plt.show()
     
     
-def plot_mel_from_data(audio, pitc_scale=1, pitch_mel=True, durations=None, level='f'):
+def plot_mel_from_data(audio, sr=24000, pitc_scale=1, pitch_mel=True, durations=None, level='f'):
     import matplotlib.pylab as plt
     
     if isinstance(audio,str) or isinstance(audio,Path):
-        _, _, melspec, _, _ = get_feature(audio)
+        _, _, melspec, _, _ = get_feature(audio, sr=sr)
         
     fig, ax = plt.subplots(figsize=(20, 4))
     im = ax.imshow(melspec, aspect="auto", origin="lower",

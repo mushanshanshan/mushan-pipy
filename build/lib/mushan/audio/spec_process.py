@@ -99,12 +99,9 @@ def linear_to_mel(spec, n_fft, num_mels, sr, fmin=0, fmax=None):
 def get_feature(audio, sr=22050, n_fft=1024, hop_size=256, win_size=1024, n_mel=80, need_f0=False, need_energy=False, need_mel=False):
 
     if audio.max() > 1:
-        audio = torch.FloatTensor(audio.astype(np.float32))
         audio_norm = audio / 2 ** 15
-        audio_norm = audio_norm.unsqueeze(0)
     else:
-        audio_norm = torch.FloatTensor(audio.astype(np.float32))
-        audio_norm = audio_norm.unsqueeze(0)
+        audio_norm = audio
         
     audio_norm = torch.nn.functional.pad(audio_norm.unsqueeze(1), (int((n_fft-hop_size)/2), int((n_fft-hop_size)/2)), mode='reflect')
     audio_norm = audio_norm.squeeze(1)
@@ -120,7 +117,7 @@ def get_feature(audio, sr=22050, n_fft=1024, hop_size=256, win_size=1024, n_mel=
                                 n_fft=n_fft,
                                 num_mels=n_mel,
                                 sr=sr
-                                )
+                                ).squeeze(0)
     else:
         mel = None
     
@@ -148,15 +145,15 @@ def get_feature(audio, sr=22050, n_fft=1024, hop_size=256, win_size=1024, n_mel=
     spec = spec.squeeze(0)
     
     if need_mel:
-        assert spec.size(1) ==  mel.size(1)
+        assert spec.shape[-1] ==  mel.shape[-1], print(spec.shape, mel.shape)
         mel = mel.squeeze(0)
         
     if need_f0:
-        assert spec.size(1) ==  F0.size(0)
+        assert spec.shape[-1] ==  F0.shape[-1], print(spec.shape, F0.shape)
         F0 = torch.from_numpy(F0)
         
     if need_energy:
-        assert spec.size(1) ==  eng.size(0)
+        assert spec.shape[-1] ==  eng.shape[-1], print(spec.shape, eng.shape)
         eng = torch.from_numpy(eng).squeeze(0)
 
     return audio_norm, spec, mel, F0, eng

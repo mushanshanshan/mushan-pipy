@@ -139,6 +139,12 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         audio_lengths = []
         text_lengths = []
         missing_file = []
+        filter_funcs = []
+        
+        for key in self.data_list: 
+            filter_func = getattr(self, f"filter_{key}", None)
+            if callable(filter_func):
+                filter_funcs.append(filter_func)
         
         if self.rank == 0:
             logger.info(f"Rank {self.rank} start processing filelists...")
@@ -146,12 +152,17 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             try:
                 audiopath, spk, dur, ori_text, pho = self.audiopaths_sid_text[i]
                 dur = float(dur)
+                val = dur > self.min_audio_len and dur < self.max_audio_len
                 
-                if dur > self.min_audio_len and dur < self.max_audio_len:
+                for filter_func in filter_funcs:
+                    val = val and filter_func(audiopath, spk, dur, ori_text, pho)
+                
+                if val:
                     audiopaths_sid_text_new.append([audiopath, spk, dur, ori_text, pho])
                     audio_lengths.append(dur)
                     text_lengths.append(len(pho))
                     self.ref_dict[spk].append(audiopath)
+                    
             except Exception as e:
                 print(e)
                 # exit(1)
@@ -178,6 +189,69 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         hu, dur = torch.unique_consecutive(hu, return_counts=True)
         
         return {"hubert_code": hu, "hubert_dur": dur}
+    
+    def get_mhubert_code(self, audiopath_sid_text, fix_boundry = 1024):
+        audiopath, spk, dur, ori_text, text = audiopath_sid_text
+        hu_filename = audiopath.replace("/wave/", "/feature/mhubert/").replace(".flac", ".code")
+        assert os.path.exists(hu_filename), hu_filename
+        
+        hu = torch.load(hu_filename, map_location=torch.device('cpu'))
+        if fix_boundry > 0:
+            hu = torch.clamp(hu, min=None, max=fix_boundry)
+        
+        return {"hubert_code": hu}
+    
+    def get_hubert_code(self, audiopath_sid_text, fix_boundry = 1024):
+        audiopath, spk, dur, ori_text, text = audiopath_sid_text
+        hu_filename = audiopath.replace("/wave/", "/feature/hubert/").replace(".flac", ".code")
+        assert os.path.exists(hu_filename), hu_filename
+        
+        hu = torch.load(hu_filename, map_location=torch.device('cpu'))
+        if fix_boundry > 0:
+            hu = torch.clamp(hu, min=None, max=fix_boundry)
+        
+        return {"hubert_code": hu}
+    
+    def filter_mhubert_code(self, audiopath, spk, dur, ori_text, pho): 
+        return len(pho) / dur > 3 and len(pho) / dur < 25
+    
+    def filter_hubert_code(self, audiopath, spk, dur, ori_text, pho): 
+        return len(pho) / dur > 3 and len(pho) / dur < 25
+    
+    def filter_hubert(self, audiopath, spk, dur, ori_text, pho): 
+        return len(pho) / dur > 3 and len(pho) / dur < 25
+    
+    def filter_robert(self, audiopath, spk, dur, ori_text, pho):
+        pho_filename = audiopath.replace("/wave/", "/feature/robert/").replace(".flac", ".pho") 
+        return os.path.exists(pho_filename)
+    
+    def get_robert(self, audiopath_sid_text, layer = 3):
+        audiopath, spk, dur, ori_text, text = audiopath_sid_text
+        pho_filename = audiopath.replace("/wave/", "/feature/robert/").replace(".flac", ".pho")
+        assert os.path.exists(pho_filename), pho_filename
+        robert_filename = audiopath.replace("/wave/", "/feature/robert/").replace(".flac", f".{layer}.pt")
+        assert os.path.exists(pho_filename), pho_filename
+        
+        pho_data = from_pickle(pho_filename)
+        ro_data = torch.load(robert_filename, map_location=torch.device('cpu'))
+        
+        pho = "_" + pho_data['phoneme'] + "_"
+        
+        robert_feature = torch.zeros(2560, len(pho_data['fea_idx']))
+        # 遍历 fea_idx 并填充长特征 tensor
+        for idx, key in enumerate(pho_data['fea_idx']):
+            if key == -1:
+                continue  # 已经是0，无需操作
+            else:
+                indices = pho_data['feature_map'][key]
+                if len(indices) == 1:
+                    robert_feature[:, idx] = ro_data[:, indices[0]]
+                else:
+                    robert_feature[:, idx] = ro_data[:, indices].mean(dim=1)
+
+        pho = self.frontend.pho_to_idx(pho, add_blank=False)
+        
+        return {"phoneme": pho, "robert_feature": robert_feature}
             
     def get_language_idx(self, audiopath_sid_text):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
@@ -322,12 +396,12 @@ class TextAudioSpeakerCollate():
             
         return {"mel_ref": ref_padded}
     
-    def get_hubert(self, batch, ids_sorted_decreasing):
+    def get_hubert(self, batch, ids_sorted_decreasing, pad_valie = 1025):
         max_hu_len = max([len(x['hubert_code']) for x in batch])
         
         hu_lengths = torch.LongTensor(len(batch))
         hu_padded = torch.LongTensor(len(batch), max_hu_len)
-        hu_padded.zero_()
+        hu_padded.fill_(pad_valie)
         hu_dur_padded = torch.LongTensor(len(batch), max_hu_len)
         hu_dur_padded.zero_()
         
@@ -342,6 +416,59 @@ class TextAudioSpeakerCollate():
         return {"hubert": hu_padded, 
                 "hubert_dur": hu_dur_padded,
                 "hubert_length": hu_lengths}
+        
+    def get_hubert_code(self, batch, ids_sorted_decreasing, pad_valie = 1025):
+        max_hu_len = max([len(x['hubert_code']) for x in batch])
+
+        hu_lengths = torch.LongTensor(len(batch))
+        hu_padded = torch.LongTensor(len(batch), max_hu_len)
+        hu_padded.fill_(pad_valie)
+        
+        for i in range(len(ids_sorted_decreasing)):
+            row = batch[ids_sorted_decreasing[i]]
+            hu = row['hubert_code']
+            hu_padded[i, :hu.size(0)] = hu
+            hu_lengths[i] = hu.size(0)
+
+        return {"hubert": hu_padded, 
+                "hubert_length": hu_lengths}
+        
+    def get_mhubert_code(self, batch, ids_sorted_decreasing, pad_valie = 1025):
+        max_hu_len = max([len(x['hubert_code']) for x in batch])
+
+        hu_lengths = torch.LongTensor(len(batch))
+        hu_padded = torch.LongTensor(len(batch), max_hu_len)
+        hu_padded.fill_(pad_valie)
+        
+        for i in range(len(ids_sorted_decreasing)):
+            row = batch[ids_sorted_decreasing[i]]
+            hu = row['hubert_code']
+            hu_padded[i, :hu.size(0)] = hu
+            hu_lengths[i] = hu.size(0)
+
+        return {"hubert": hu_padded, 
+                "hubert_length": hu_lengths}
+        
+    def get_robert(self, batch, ids_sorted_decreasing):
+        max_pho_len = max([len(x['phoneme']) for x in batch])
+
+        pho_lengths = torch.LongTensor(len(batch))
+        pho_padded = torch.LongTensor(len(batch), max_pho_len)
+        robert_padded = torch.FloatTensor(len(batch), batch[0]['robert_feature'].size(0), max_pho_len)
+        pho_padded.zero_()
+        
+        for i in range(len(ids_sorted_decreasing)):
+            row = batch[ids_sorted_decreasing[i]]
+            pho = row['phoneme']
+            pho_padded[i, :pho.size(0)] = pho
+            pho_lengths[i] = pho.size(0)
+            
+            robert = row['robert_feature']
+            robert_padded[i, :, :robert.size(1)] = robert
+
+        return {"phoneme": pho_padded, 
+                "phoneme_length": pho_lengths,
+                "robert_feature": robert_padded}
     
     
     def get_phoneme(self, batch, ids_sorted_decreasing):
@@ -387,17 +514,27 @@ class TextAudioSpeakerCollate():
                 "wave_audio_length": wave_lengths}
 
     def __call__(self, batch):
+        sort_key = None
+        res = {}
         
         for i in ['mel_spec', 'linear_spec']:
             if i in batch[0].keys():
                 sort_key = i
+                _, ids_sorted_decreasing = torch.sort(
+                    torch.LongTensor([x[sort_key].size(1) for x in batch]),
+                    dim=0, descending=True)
                 break
-
-        res = {}
-        _, ids_sorted_decreasing = torch.sort(
-            torch.LongTensor([x[sort_key].size(1) for x in batch]),
-            dim=0, descending=True)
         
+        # dim 0 排序
+        if sort_key == None:
+            for i in ['phoneme']:
+                if i in batch[0].keys():
+                    sort_key = i
+                    _, ids_sorted_decreasing = torch.sort(
+                        torch.LongTensor([x[sort_key].size(0) for x in batch]),
+                        dim=0, descending=True)
+                    break
+
         for key in self.data_list:
             try:
                 func = getattr(self, f"get_{key}")
@@ -516,148 +653,3 @@ class DistributedBucketSampler(torch.utils.data.distributed.DistributedSampler):
 
     def __len__(self):
         return self.num_samples // self.batch_size
-
-
-# class DistributedBucketSampler(torch.utils.data.distributed.DistributedSampler):
-#     """
-#     Maintain similar input lengths in a batch.
-#     Length groups are specified by boundaries.
-#     Ex) boundaries = [b1, b2, b3] -> any batch is included either {x | b1 < length(x) <=b2} or {x | b2 < length(x) <= b3}.
-  
-#     It removes samples which are not included in the boundaries.
-#     Ex) boundaries = [b1, b2, b3] -> any x s.t. length(x) <= b1 or length(x) > b3 are discarded.
-#     """
-
-#     def __init__(self, dataset, batch_size, boundaries, gpu_mem_limite=-1, gpu_mem_pred=None, num_replicas=None, rank=None, shuffle=True):
-#         super().__init__(dataset, num_replicas=num_replicas, rank=rank, shuffle=shuffle)
-#         self.audio_lengths = dataset.audio_lengths
-#         self.text_lengths = dataset.text_lengths
-#         self.rank = dataset.rank
-
-#         self.batch_size = batch_size
-
-#         self.min_len, self.max_len = boundaries
-        
-        
-#         self.gpu_mem_limite = gpu_mem_limite
-#         if self.gpu_mem_limite > 0:
-#             self.pred_mem = [gpu_mem_pred(self.audio_lengths[i], self.text_lengths[i]) for i in range(len(self.audio_lengths))]
-#         else:
-#             self.pred_mem = None
-        
-#         self.boundaries = list(range(self.min_len, self.max_len+1))
-            
-#         self.buckets, self.num_samples_per_bucket = self._create_buckets()
-        
-#         self.total_size = sum(self.num_samples_per_bucket)
-#         self.num_samples = self.total_size // self.num_replicas
-
-#     def _create_buckets(self):
-#         buckets = [[] for _ in range(len(self.boundaries) - 1)]
-#         for i in range(len(self.audio_lengths)):
-#             length = self.audio_lengths[i]
-#             idx_bucket = self._bisect(length)
-#             if idx_bucket != -1:
-#                 try:
-#                     buckets[idx_bucket].append(i)
-#                 except:
-#                     print(length)
-
-#         for i in range(len(buckets) - 1, -1, -1):
-#             if len(buckets[i]) == 0:
-#                 buckets.pop(i)
-#                 self.boundaries.pop(i + 1)
-
-#         num_samples_per_bucket = []
-#         for i in range(len(buckets)):
-#             len_bucket = len(buckets[i])
-#             total_batch_size = self.num_replicas * self.batch_size
-#             rem = (total_batch_size - (len_bucket % total_batch_size)) % total_batch_size
-#             num_samples_per_bucket.append(len_bucket + rem)
-            
-#         if self.rank == 0:
-#             logger.info("****************** Buckets *********************")
-#             for i in range(len(buckets)):
-#                 logger.info(f"[{self.boundaries[i], self.boundaries[i+1]}]:{len(buckets[i])}")
-#             logger.info("************************************************")
-
-           
-        
-#         return buckets, num_samples_per_bucket
-
-#     def __iter__(self):
-#         # deterministically shuffle based on epoch
-#         g = torch.Generator()
-#         g.manual_seed(self.epoch)
-
-#         indices = []
-#         if self.shuffle:
-#             for bucket in self.buckets:
-#                 indices.append(torch.randperm(len(bucket), generator=g).tolist())
-#         else:
-#             for bucket in self.buckets:
-#                 indices.append(list(range(len(bucket))))
-
-#         batches = []
-        
-#         for i in range(len(self.buckets)):
-#             bucket = self.buckets[i]
-#             len_bucket = len(bucket)
-#             ids_bucket = indices[i]
-#             num_samples_bucket = self.num_samples_per_bucket[i]
-
-#             # # add extra samples to make it evenly divisible
-#             # rem = num_samples_bucket - len_bucket
-#             # ids_bucket = ids_bucket + ids_bucket * (rem // len_bucket) + ids_bucket[:(rem % len_bucket)]
-
-#             # subsample
-#             ids_bucket = ids_bucket[self.rank::self.num_replicas]
-
-#             if self.gpu_mem_limite < 0:
-#                 # batching
-#                 for j in range(len(ids_bucket) // self.batch_size):
-#                     batch = [bucket[idx] for idx in ids_bucket[j * self.batch_size:(j + 1) * self.batch_size]]
-#                     if len(batch) == self.batch_size:
-#                         batches.append(batch)
-#             else:
-#                 cur_men = self.gpu_mem_limite
-#                 batch = []
-#                 for i in ids_bucket:
-#                     pred_mem = self.pred_mem[bucket[i]]
-#                     if len(batch) < 2 or cur_men - pred_mem > 0:
-#                         batch.append(bucket[i])
-#                         cur_men -= pred_mem
-#                     else:
-#                         batches.append(batch)
-#                         batch = [bucket[i]]
-#                         cur_men = self.gpu_mem_limite - pred_mem
-                
-#                 # Drop last
-#                 if len(batch) > 1:
-#                     batches.append(batch)
-
-        
-#         if self.shuffle:
-#             batch_ids = torch.randperm(len(batches), generator=g).tolist()
-#             batches = [batches[i] for i in batch_ids]
-#         self.batches = batches
-        
-#         return iter(self.batches)
-
-#     def _bisect(self, x, lo=0, hi=None):
-#         if hi is None:
-#             hi = len(self.boundaries) - 1
-
-#         if hi > lo:
-#             mid = (hi + lo) // 2
-#             if self.boundaries[mid] < x and x <= self.boundaries[mid + 1]:
-#                 return mid
-#             elif x <= self.boundaries[mid]:
-#                 return self._bisect(x, lo, mid)
-#             else:
-#                 return self._bisect(x, mid + 1, hi)
-#         else:
-#             return -1
-
-#     def __len__(self):
-#         return self.num_samples // self.batch_size
