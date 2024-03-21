@@ -1,10 +1,10 @@
 import torch
 import os
 from varname import argname
-
+import torch.nn as nn
 
 def count_parameters(model):
-    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+    return sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e6
 
 def enable_debug_mode():
     os.environ['MUSHAN_DEBUG']= "1"
@@ -22,6 +22,12 @@ def debug_shape(*args):
     for i in range(len(args)):
         assert isinstance(args[i], torch.Tensor)
         print(f"{argname(f'args[{i}]')}.shape: {str(list(args[i].shape))}, {str(args[i].dtype)[6:]}")
+        
+def debug_nan(*args):
+    for i in range(len(args)):
+        assert isinstance(args[i], torch.Tensor)
+        if torch.isnan(args[i]).any():
+            print(f"{argname(f'args[{i}]')}.shape: {str(list(args[i].shape))}, {str(args[i].dtype)[6:]}")
 
 
 def print_shape(*args):
@@ -68,4 +74,73 @@ def set_cuda(gpus=None):
         print("Current CUDA Devices: {}".format(torch.cuda.current_device()))
         print("Total Visible CUDA Device Count: {}".format(torch.cuda.device_count()))
     
+    
+def weight_init(m):
+    import torch.nn.init as init
+    '''
+    Usage:
+        model = Model()
+        model.apply(weight_init)
+    '''
+    if isinstance(m, nn.Conv1d):
+        init.normal_(m.weight.data)
+        if m.bias is not None:
+            init.normal_(m.bias.data)
+    elif isinstance(m, nn.Conv2d):
+        init.xavier_normal_(m.weight.data)
+        if m.bias is not None:
+            init.normal_(m.bias.data)
+    elif isinstance(m, nn.Conv3d):
+        init.xavier_normal_(m.weight.data)
+        if m.bias is not None:
+            init.normal_(m.bias.data)
+    elif isinstance(m, nn.ConvTranspose1d):
+        init.normal_(m.weight.data)
+        if m.bias is not None:
+            init.normal_(m.bias.data)
+    elif isinstance(m, nn.ConvTranspose2d):
+        init.xavier_normal_(m.weight.data)
+        if m.bias is not None:
+            init.normal_(m.bias.data)
+    elif isinstance(m, nn.ConvTranspose3d):
+        init.xavier_normal_(m.weight.data)
+        if m.bias is not None:
+            init.normal_(m.bias.data)
+    elif isinstance(m, nn.BatchNorm1d):
+        init.normal_(m.weight.data, mean=1, std=0.02)
+        init.constant_(m.bias.data, 0)
+    elif isinstance(m, nn.BatchNorm2d):
+        init.normal_(m.weight.data, mean=1, std=0.02)
+        init.constant_(m.bias.data, 0)
+    elif isinstance(m, nn.BatchNorm3d):
+        init.normal_(m.weight.data, mean=1, std=0.02)
+        init.constant_(m.bias.data, 0)
+    elif isinstance(m, nn.Linear):
+        init.xavier_normal_(m.weight.data)
+        if m.bias is not None:
+            init.normal_(m.bias.data)
+    elif isinstance(m, nn.LSTM):
+        for param in m.parameters():
+            if len(param.shape) >= 2:
+                init.orthogonal_(param.data)
+            else:
+                init.normal_(param.data)
+    elif isinstance(m, nn.LSTMCell):
+        for param in m.parameters():
+            if len(param.shape) >= 2:
+                init.orthogonal_(param.data)
+            else:
+                init.normal_(param.data)
+    elif isinstance(m, nn.GRU):
+        for param in m.parameters():
+            if len(param.shape) >= 2:
+                init.orthogonal_(param.data)
+            else:
+                init.normal_(param.data)
+    elif isinstance(m, nn.GRUCell):
+        for param in m.parameters():
+            if len(param.shape) >= 2:
+                init.orthogonal_(param.data)
+            else:
+                init.normal_(param.data)
     

@@ -6,6 +6,14 @@ import lilcom
 import lzma
 from dotmap import DotMap
 import tomli
+import hashlib
+
+def str_to_int(s):
+    # 使用md5哈希函数获取字符串的哈希值
+    hash_object = hashlib.md5(s.encode())
+    # 取哈希值的十六进制表示的最后一个字符，然后对10取模
+    digit = int(hash_object.hexdigest(), 16) % 10
+    return digit
 
 def from_pickle(filename):
     with open(filename, "rb") as f:
@@ -23,7 +31,7 @@ def from_text(filename):
     return text
 
 def to_text(filename, data):
-    with open(filename, "w") as f:
+    with open(filename, "w", encoding='utf-8') as f:
         for d in data:
             f.write(d)
 

@@ -319,8 +319,9 @@ def get_hparams(init=True):
     else:
         config.train.port = random.randint(35777,36000)
     config.train.n_gpus = args.n_gpus
-    config.train.name = args.model
+    config.train.model = args.model
     config.train.test = args.test_mode or args.tag == 'test'
+    config.checkpoint.load_checkpoint = False
     
     if args.continue_train:
         checkpoint_path = os.path.dirname(config_file)

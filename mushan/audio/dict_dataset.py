@@ -10,10 +10,21 @@ import torchaudio
 import copy
 from collections import defaultdict
 from loguru import logger
-from mushan.io import from_pickle
+from mushan.io import from_pickle, to_pickle
 from mushan.text.eng.front_end import Frontend as ENFrontend
 from mushan.text.chs.front_end import Frontend as CNFrontend
 from mushan.models.bigv.utils import bigv_mel
+
+def build_black_list(filename, key):
+    key_black_list_path = f"/home/mushan/data/filelists/blacklists/{key}.pk"
+    if os.path.exists(key_black_list_path):
+        blist = from_pickle(key_black_list_path)
+    else:
+        blist = []
+    blist += [audiopath.split("/")[-1].split(".")[0] for audiopath in filename]
+    to_pickle(key_black_list_path, blist)
+    
+    return os.path.exists(key_black_list_path)
 
 class TorchStandardScaler:
     def fit(self, x):
@@ -141,10 +152,16 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         missing_file = []
         filter_funcs = []
         
+        blacklist = set()
+        
         for key in self.data_list: 
             filter_func = getattr(self, f"filter_{key}", None)
             if callable(filter_func):
                 filter_funcs.append(filter_func)
+            key_black_list_path = f"/home/mushan/data/filelists/blacklists/{key}.pk"
+            if os.path.exists(key_black_list_path):
+                cur_blacklist = from_pickle(key_black_list_path)
+                blacklist = blacklist | set(cur_blacklist)
         
         if self.rank == 0:
             logger.info(f"Rank {self.rank} start processing filelists...")
@@ -152,6 +169,9 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             try:
                 audiopath, spk, dur, ori_text, pho = self.audiopaths_sid_text[i]
                 dur = float(dur)
+                
+                if audiopath.split("/")[-1].split(".")[0] in blacklist:
+                    continue
                 val = dur > self.min_audio_len and dur < self.max_audio_len
                 
                 for filter_func in filter_funcs:
@@ -175,6 +195,21 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         if self.rank == 0:
             logger.info(f"Avaliable data length: {len(self.audiopaths_sid_text)}")
             
+    def torch_load_single(self, audiopath_sid_text, path_replaecments, return_key, post_process = []):
+        audiopath, spk, dur, ori_text, text = audiopath_sid_text
+        target_file = audiopath
+        
+        for k, v in path_replaecments.items():
+            target_file = target_file.replace(k, v)
+        
+        assert os.path.exists(target_file), target_file
+        data = torch.load(target_file, map_location=torch.device('cpu'))
+        
+        for function in post_process:
+            data = function(data)
+            
+        return {return_key: data}
+            
     def get_audiopath(self, audiopath_sid_text):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
         
@@ -190,27 +225,39 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         
         return {"hubert_code": hu, "hubert_dur": dur}
     
-    def get_mhubert_code(self, audiopath_sid_text, fix_boundry = 1024):
-        audiopath, spk, dur, ori_text, text = audiopath_sid_text
-        hu_filename = audiopath.replace("/wave/", "/feature/mhubert/").replace(".flac", ".code")
-        assert os.path.exists(hu_filename), hu_filename
-        
-        hu = torch.load(hu_filename, map_location=torch.device('cpu'))
-        if fix_boundry > 0:
-            hu = torch.clamp(hu, min=None, max=fix_boundry)
-        
-        return {"hubert_code": hu}
+
     
-    def get_hubert_code(self, audiopath_sid_text, fix_boundry = 1024):
-        audiopath, spk, dur, ori_text, text = audiopath_sid_text
-        hu_filename = audiopath.replace("/wave/", "/feature/hubert/").replace(".flac", ".code")
-        assert os.path.exists(hu_filename), hu_filename
+    def get_mhubert_code(self, audiopath_sid_text):
+        return self.torch_load_single(
+            audiopath_sid_text,
+            path_replaecments = {
+                "/wave/": "/feature/mhubert/",
+                ".flac": ".code"
+                # ".flac": ".align.code"
+            },
+            return_key = "hubert_code",
+        )
+
+    
+    def get_hubert_code(self, audiopath_sid_text):
+        return self.torch_load_single(
+            audiopath_sid_text,
+            path_replaecments = {
+                "/wave/": "/feature/hubert/",
+                ".flac": ".code"
+            },
+            return_key = "hubert_code",
+        )
         
-        hu = torch.load(hu_filename, map_location=torch.device('cpu'))
-        if fix_boundry > 0:
-            hu = torch.clamp(hu, min=None, max=fix_boundry)
-        
-        return {"hubert_code": hu}
+    def get_enhubert_code(self, audiopath_sid_text):
+        return self.torch_load_single(
+            audiopath_sid_text,
+            path_replaecments = {
+                "/wave/": "/feature/hubert/",
+                ".flac": ".en.code"
+            },
+            return_key = "hubert_code",
+        )
     
     def filter_mhubert_code(self, audiopath, spk, dur, ori_text, pho): 
         return len(pho) / dur > 3 and len(pho) / dur < 25
@@ -221,35 +268,34 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
     def filter_hubert(self, audiopath, spk, dur, ori_text, pho): 
         return len(pho) / dur > 3 and len(pho) / dur < 25
     
-    def filter_robert(self, audiopath, spk, dur, ori_text, pho):
-        pho_filename = audiopath.replace("/wave/", "/feature/robert/").replace(".flac", ".pho") 
-        return os.path.exists(pho_filename)
-    
     def get_robert(self, audiopath_sid_text, layer = 3):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
-        pho_filename = audiopath.replace("/wave/", "/feature/robert/").replace(".flac", ".pho")
+        pho_filename = audiopath.replace("/wave/", "/feature/robert/").replace(".flac", ".p2f")
         assert os.path.exists(pho_filename), pho_filename
         robert_filename = audiopath.replace("/wave/", "/feature/robert/").replace(".flac", f".{layer}.pt")
         assert os.path.exists(pho_filename), pho_filename
         
         pho_data = from_pickle(pho_filename)
         ro_data = torch.load(robert_filename, map_location=torch.device('cpu'))
+        pho = pho_data['pho']
+        p2w = pho_data['p2w']
         
-        pho = "_" + pho_data['phoneme'] + "_"
-        
-        robert_feature = torch.zeros(2560, len(pho_data['fea_idx']))
+        robert_feature = torch.zeros(768, len(p2w))
         # 遍历 fea_idx 并填充长特征 tensor
-        for idx, key in enumerate(pho_data['fea_idx']):
+        for idx, key in enumerate(p2w):
             if key == -1:
                 continue  # 已经是0，无需操作
             else:
-                indices = pho_data['feature_map'][key]
+                indices = pho_data['w2f'][key]
                 if len(indices) == 1:
                     robert_feature[:, idx] = ro_data[:, indices[0]]
-                else:
+                elif len(indices) > 1:
                     robert_feature[:, idx] = ro_data[:, indices].mean(dim=1)
 
-        pho = self.frontend.pho_to_idx(pho, add_blank=False)
+        if torch.isnan(robert_feature).any():
+            print("nan error:", audiopath)
+        
+        pho = self.frontend.pho_to_idx(pho_data['pho'], add_blank=False)
         
         return {"phoneme": pho, "robert_feature": robert_feature}
             
@@ -266,12 +312,14 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         return {"language_idx": lang_idx}
             
     def get_mel_spec(self, audiopath_sid_text):
-        audiopath, spk, dur, ori_text, text = audiopath_sid_text
-        spec_filename = audiopath.replace("/wave/", "/feature/mel_spec/").replace(".flac", f".mel")
-        assert os.path.exists(spec_filename), spec_filename
-        
-        spec = torch.load(spec_filename, map_location='cpu')
-        return {"mel_spec": spec}
+        return self.torch_load_single(
+            audiopath_sid_text,
+            path_replaecments = {
+                "/wave/": "/feature/mel_spec/",
+                ".flac": ".mel"
+            },
+            return_key = "mel_spec",
+        )
     
     def get_mel_ref(self, audiopath_sid_text):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
@@ -294,14 +342,40 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         data, sr = torchaudio.load(audiopath)
         return {"wave_audio": data.squeeze(0)}
     
-    def get_linear_spec(self, audiopath_sid_text):
+    def get_align_wave_audio(self, audiopath_sid_text):
+        n_fft = 960
+        hop_size = 240
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
+        data, sr = torchaudio.load(audiopath)
+        data = torch.nn.functional.pad(
+            data.unsqueeze(1),
+            (int((n_fft - hop_size) / 2), int((n_fft - hop_size) / 2)),
+            mode="reflect",
+        )
+        data = data.squeeze(1)
+        if data.shape[-1] % hop_size == 239:
+            data = torch.cat((data, torch.zeros(1, 1)), dim = -1)
+        return {"wave_audio": data.squeeze(0)}
+    
+    def get_linear_spec(self, audiopath_sid_text):
+        return self.torch_load_single(
+            audiopath_sid_text,
+            path_replaecments = {
+                "/wave/": "/feature/linear_spec/",
+                ".flac": ".linear"
+            },
+            return_key = "linear_spec",
+        )
         
-        spec_filename = audiopath.replace("/wave/", "/feature/linear_spec/").replace(".flac", ".linear")
-        assert os.path.exists(spec_filename), spec_filename
-        
-        spec = torch.load(spec_filename, map_location='cpu')
-        return {"linear_spec": spec}
+    def get_align_linear_spec(self, audiopath_sid_text):
+        return self.torch_load_single(
+            audiopath_sid_text,
+            path_replaecments = {
+                "/wave/": "/feature/linear_spec/",
+                ".flac": ".align.linear"
+            },
+            return_key = "linear_spec",
+        )
     
     def get_your_ref(self, audiopath_sid_text):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
@@ -344,7 +418,7 @@ class TextAudioSpeakerCollate():
         self.optional = optional
         
     
-    def get_language_idx(self, batch, ids_sorted_decreasing):
+    def collect_language_idx(self, batch, ids_sorted_decreasing):
         lang_idx = torch.LongTensor(len(batch))
         
         for i in range(len(ids_sorted_decreasing)):
@@ -353,38 +427,76 @@ class TextAudioSpeakerCollate():
 
         return {"language_idx": lang_idx}
     
-    def get_linear_spec(self, batch, ids_sorted_decreasing):
-        max_spec_len = max([x['linear_spec'].size(1) for x in batch])
-        spec_lengths = torch.LongTensor(len(batch))
-        spec_padded = torch.FloatTensor(len(batch), batch[0]['linear_spec'].size(0), max_spec_len)
-        spec_padded.zero_()
+    def collect_2D_with_length(self, batch, ids_sorted_decreasing, feature_key, length_dim_idx = 1, pad_value = 0, feature_dtype = torch.float):
+        max_feature_len = max([x[feature_key].size(length_dim_idx) for x in batch])
+        feature_lengths = torch.LongTensor(len(batch))
+        
+        if feature_dtype == torch.float or feature_dtype == torch.float32:
+            feature_padded = torch.FloatTensor(len(batch), batch[0][feature_key].size(0), max_feature_len)
+        elif feature_dtype == torch.long:
+            feature_padded = torch.LongTensor(len(batch), batch[0][feature_key].size(0), max_feature_len)
+        else:
+            raise NotImplementedError
+        
+        feature_padded.fill_(pad_value)
         
         for i in range(len(ids_sorted_decreasing)):
             row = batch[ids_sorted_decreasing[i]]
-            spec = row['linear_spec']
-            spec_padded[i, :, :spec.size(1)] = spec
-            spec_lengths[i] = spec.size(1)
-
-        return {"linear": spec_padded, 
-                "linear_length": spec_lengths}
+            feature = row[feature_key]
+            feature_padded[i, :, :feature.size(1)] = feature
+            feature_lengths[i] = feature.size(1)
         
+        return {feature_key: feature_padded, 
+                f"{feature_key}_length": feature_lengths}
         
-    def get_mel_spec(self, batch, ids_sorted_decreasing):
-        max_spec_len = max([x['mel_spec'].size(1) for x in batch])
-        spec_lengths = torch.LongTensor(len(batch))
-        spec_padded = torch.FloatTensor(len(batch), batch[0]['mel_spec'].size(0), max_spec_len)
-        spec_padded.zero_()
+    def collect_1D_with_length(self, batch, ids_sorted_decreasing, feature_key, pad_value = 0, feature_dtype = torch.float):
+        
+        max_feature_len = max([len(x[feature_key]) for x in batch])
+        feature_lengths = torch.LongTensor(len(batch))
+        
+        if feature_dtype == torch.float or feature_dtype == torch.float32:
+            feature_padded = torch.FloatTensor(len(batch), max_feature_len)
+        elif feature_dtype == torch.long:
+            feature_padded = torch.LongTensor(len(batch), max_feature_len)
+        else:
+            raise NotImplementedError
+        
+        feature_padded.fill_(pad_value)
         
         for i in range(len(ids_sorted_decreasing)):
             row = batch[ids_sorted_decreasing[i]]
-            spec = row['mel_spec']
-            spec_padded[i, :, :spec.size(1)] = spec
-            spec_lengths[i] = spec.size(1)
-
-        return {"mel": spec_padded, 
-                "mel_length": spec_lengths}
+            feature = row[feature_key]
+            feature_padded[i, :feature.size(0)] = feature
+            feature_lengths[i] = feature.size(0)
+        
+        return {feature_key: feature_padded, 
+                f"{feature_key}_length": feature_lengths}
     
-    def get_mel_ref(self, batch, ids_sorted_decreasing):
+    def collect_linear_spec(self, batch, ids_sorted_decreasing):
+        return self.collect_2D_with_length(
+            batch,
+            ids_sorted_decreasing,
+            feature_key = "linear_spec",
+            feature_dtype = torch.float
+        )
+        
+    def collect_align_linear_spec(self, batch, ids_sorted_decreasing):
+        return self.collect_2D_with_length(
+            batch,
+            ids_sorted_decreasing,
+            feature_key = "linear_spec",
+            feature_dtype = torch.float
+        )
+        
+    def collect_mel_spec(self, batch, ids_sorted_decreasing):
+        return self.collect_2D_with_length(
+            batch,
+            ids_sorted_decreasing,
+            feature_key = "mel_spec",
+            feature_dtype = torch.float
+        )
+    
+    def collect_mel_ref(self, batch, ids_sorted_decreasing):
         max_ref_len = max([x["mel_ref"].size(1) for x in batch])
         ref_padded = torch.FloatTensor(len(batch), batch[0]['mel_ref'].size(0), max_ref_len)
         ref_padded.zero_()
@@ -396,7 +508,7 @@ class TextAudioSpeakerCollate():
             
         return {"mel_ref": ref_padded}
     
-    def get_hubert(self, batch, ids_sorted_decreasing, pad_valie = 1025):
+    def collect_hubert(self, batch, ids_sorted_decreasing, pad_valie = 1025):
         max_hu_len = max([len(x['hubert_code']) for x in batch])
         
         hu_lengths = torch.LongTensor(len(batch))
@@ -417,45 +529,41 @@ class TextAudioSpeakerCollate():
                 "hubert_dur": hu_dur_padded,
                 "hubert_length": hu_lengths}
         
-    def get_hubert_code(self, batch, ids_sorted_decreasing, pad_valie = 1025):
-        max_hu_len = max([len(x['hubert_code']) for x in batch])
-
-        hu_lengths = torch.LongTensor(len(batch))
-        hu_padded = torch.LongTensor(len(batch), max_hu_len)
-        hu_padded.fill_(pad_valie)
+    def collect_hubert_code(self, batch, ids_sorted_decreasing, pad_value = 1025):
+        return self.collect_1D_with_length(
+            batch,
+            ids_sorted_decreasing,
+            feature_key = "hubert_code",
+            pad_value = pad_value,
+            feature_dtype = torch.long
+        )
         
-        for i in range(len(ids_sorted_decreasing)):
-            row = batch[ids_sorted_decreasing[i]]
-            hu = row['hubert_code']
-            hu_padded[i, :hu.size(0)] = hu
-            hu_lengths[i] = hu.size(0)
-
-        return {"hubert": hu_padded, 
-                "hubert_length": hu_lengths}
+    def collect_mhubert_code(self, batch, ids_sorted_decreasing, pad_value = 1025):
+        return self.collect_1D_with_length(
+            batch,
+            ids_sorted_decreasing,
+            feature_key = "hubert_code",
+            pad_value = pad_value,
+            feature_dtype = torch.long
+        )
         
-    def get_mhubert_code(self, batch, ids_sorted_decreasing, pad_valie = 1025):
-        max_hu_len = max([len(x['hubert_code']) for x in batch])
-
-        hu_lengths = torch.LongTensor(len(batch))
-        hu_padded = torch.LongTensor(len(batch), max_hu_len)
-        hu_padded.fill_(pad_valie)
+    def collect_enhubert_code(self, batch, ids_sorted_decreasing, pad_value = 511):
+        return self.collect_1D_with_length(
+            batch,
+            ids_sorted_decreasing,
+            feature_key = "hubert_code",
+            pad_value = pad_value,
+            feature_dtype = torch.long
+        )
         
-        for i in range(len(ids_sorted_decreasing)):
-            row = batch[ids_sorted_decreasing[i]]
-            hu = row['hubert_code']
-            hu_padded[i, :hu.size(0)] = hu
-            hu_lengths[i] = hu.size(0)
-
-        return {"hubert": hu_padded, 
-                "hubert_length": hu_lengths}
-        
-    def get_robert(self, batch, ids_sorted_decreasing):
+    def collect_robert(self, batch, ids_sorted_decreasing):
         max_pho_len = max([len(x['phoneme']) for x in batch])
 
         pho_lengths = torch.LongTensor(len(batch))
         pho_padded = torch.LongTensor(len(batch), max_pho_len)
         robert_padded = torch.FloatTensor(len(batch), batch[0]['robert_feature'].size(0), max_pho_len)
         pho_padded.zero_()
+        robert_padded.zero_()
         
         for i in range(len(ids_sorted_decreasing)):
             row = batch[ids_sorted_decreasing[i]]
@@ -469,9 +577,8 @@ class TextAudioSpeakerCollate():
         return {"phoneme": pho_padded, 
                 "phoneme_length": pho_lengths,
                 "robert_feature": robert_padded}
-    
-    
-    def get_phoneme(self, batch, ids_sorted_decreasing):
+        
+    def collect_phoneme(self, batch, ids_sorted_decreasing):
         max_pho_len = max([len(x['phoneme']) for x in batch])
         pho_lengths = torch.LongTensor(len(batch))
         pho_padded = torch.LongTensor(len(batch), max_pho_len)
@@ -486,7 +593,7 @@ class TextAudioSpeakerCollate():
         return {"phoneme": pho_padded, 
                 "phoneme_length": pho_lengths}
     
-    def get_your_ref(self, batch, ids_sorted_decreasing):
+    def collect_your_ref(self, batch, ids_sorted_decreasing):
         max_ref_len = max([len(x['your_ref']) for x in batch])
         ref_padded = torch.FloatTensor(len(batch), max_ref_len)
         ref_padded.zero_()
@@ -498,7 +605,7 @@ class TextAudioSpeakerCollate():
 
         return {"your_ref": ref_padded}
         
-    def get_wave_audio(self, batch, ids_sorted_decreasing):
+    def collect_wave_audio(self, batch, ids_sorted_decreasing):
         max_wave_len = max([len(x['wave_audio']) for x in batch])
         wave_lengths = torch.LongTensor(len(batch))
         wave_padded = torch.FloatTensor(len(batch), max_wave_len)
@@ -512,6 +619,9 @@ class TextAudioSpeakerCollate():
 
         return {"wave_audio": wave_padded, 
                 "wave_audio_length": wave_lengths}
+        
+    def collect_align_wave_audio(self, batch, ids_sorted_decreasing):
+        return self.collect_wave_audio(batch, ids_sorted_decreasing)
 
     def __call__(self, batch):
         sort_key = None
@@ -537,7 +647,7 @@ class TextAudioSpeakerCollate():
 
         for key in self.data_list:
             try:
-                func = getattr(self, f"get_{key}")
+                func = getattr(self, f"collect_{key}")
                 res.update(func(batch, ids_sorted_decreasing))
             except AttributeError:
                 raise NotImplementedError("Class `{}` does not implement `{}`".format(self.__class__.__name__, key))
