@@ -342,18 +342,10 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         data, sr = torchaudio.load(audiopath)
         return {"wave_audio": data.squeeze(0)}
     
-    def get_align_wave_audio(self, audiopath_sid_text):
-        n_fft = 960
-        hop_size = 240
+    def get_pad_wave_audio(self, audiopath_sid_text):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
         data, sr = torchaudio.load(audiopath)
-        data = torch.nn.functional.pad(
-            data.unsqueeze(1),
-            (int((n_fft - hop_size) / 2), int((n_fft - hop_size) / 2)),
-            mode="reflect",
-        )
-        data = data.squeeze(1)
-        if data.shape[-1] % hop_size == 239:
+        if data.shape[-1] % 240 == 239:
             data = torch.cat((data, torch.zeros(1, 1)), dim = -1)
         return {"wave_audio": data.squeeze(0)}
     
@@ -367,12 +359,12 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             return_key = "linear_spec",
         )
         
-    def get_align_linear_spec(self, audiopath_sid_text):
+    def get_240_linear_spec(self, audiopath_sid_text):
         return self.torch_load_single(
             audiopath_sid_text,
             path_replaecments = {
                 "/wave/": "/feature/linear_spec/",
-                ".flac": ".align.linear"
+                ".flac": ".240.pad.linear"
             },
             return_key = "linear_spec",
         )
@@ -480,7 +472,7 @@ class TextAudioSpeakerCollate():
             feature_dtype = torch.float
         )
         
-    def collect_align_linear_spec(self, batch, ids_sorted_decreasing):
+    def collect_240_linear_spec(self, batch, ids_sorted_decreasing):
         return self.collect_2D_with_length(
             batch,
             ids_sorted_decreasing,
@@ -620,7 +612,7 @@ class TextAudioSpeakerCollate():
         return {"wave_audio": wave_padded, 
                 "wave_audio_length": wave_lengths}
         
-    def collect_align_wave_audio(self, batch, ids_sorted_decreasing):
+    def collect_pad_wave_audio(self, batch, ids_sorted_decreasing):
         return self.collect_wave_audio(batch, ids_sorted_decreasing)
 
     def __call__(self, batch):
