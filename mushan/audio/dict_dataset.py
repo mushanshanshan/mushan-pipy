@@ -93,6 +93,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         self.cleaned_text = config.data.cleaned_text
 
         self.add_blank = config.data.add_blank
+        
         self.min_text_len = config.data.min_text_len
         self.max_text_len = config.data.max_text_len
         
@@ -151,7 +152,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         text_lengths = []
         missing_file = []
         filter_funcs = []
-        
+        total_dur = 0
         blacklist = set()
         
         for key in self.data_list: 
@@ -169,11 +170,15 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             try:
                 audiopath, spk, dur, ori_text, pho = self.audiopaths_sid_text[i]
                 dur = float(dur)
+                total_dur += dur
                 
                 if audiopath.split("/")[-1].split(".")[0] in blacklist:
                     continue
-                val = dur > self.min_audio_len and dur < self.max_audio_len
                 
+                val = True
+                
+                val = val and dur > self.min_audio_len and dur < self.max_audio_len
+                val = val and len(pho) > self.min_text_len and len(pho) < self.max_text_len
                 for filter_func in filter_funcs:
                     val = val and filter_func(audiopath, spk, dur, ori_text, pho)
                 
@@ -193,7 +198,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         self.audio_lengths = audio_lengths
         self.text_lengths = text_lengths
         if self.rank == 0:
-            logger.info(f"Avaliable data length: {len(self.audiopaths_sid_text)}")
+            logger.info(f"Avaliable data length: {len(self.audiopaths_sid_text)} | {int(total_dur/60/60)} hours")
             
     def torch_load_single(self, audiopath_sid_text, path_replaecments, return_key, post_process = []):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
@@ -235,7 +240,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
                 ".flac": ".code"
                 # ".flac": ".align.code"
             },
-            return_key = "hubert_code",
+            return_key = "mhubert_code",
         )
 
     
@@ -331,6 +336,20 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         
         spec = torch.load(spec_filename, map_location='cpu')
         return {"mel_ref": spec}
+    
+    def get_mhubert_ref(self, audiopath_sid_text):
+        audiopath, spk, dur, ori_text, text = audiopath_sid_text
+        assert len(self.ref_dict[spk]) > 0, spk
+        
+        ref = random.choice(self.ref_dict[spk])
+        spec_filename = ref.replace("/wave/", "/feature/mhubert/").replace(".flac", ".code")
+        assert os.path.exists(spec_filename), spec_filename
+        
+        spec = torch.load(spec_filename, map_location='cpu')
+        if spec.shape[-1] > 150:
+            start = random.randint(0, spec.shape[-1] - 150)
+            spec = spec[start: start+150]
+        return {"mhubert_ref": spec}
     
     def get_phoneme(self, audiopath_sid_text):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
@@ -534,10 +553,26 @@ class TextAudioSpeakerCollate():
         return self.collect_1D_with_length(
             batch,
             ids_sorted_decreasing,
-            feature_key = "hubert_code",
+            feature_key = "mhubert_code",
             pad_value = pad_value,
             feature_dtype = torch.long
         )
+    
+    def collect_mhubert_ref(self, batch, ids_sorted_decreasing, pad_value = 1025):
+        max_feature_len = max([len(x["mhubert_ref"]) for x in batch]) + 1
+        feature_lengths = torch.LongTensor(len(batch))
+        
+        feature_padded = torch.LongTensor(len(batch), max_feature_len)
+
+        feature_padded.fill_(pad_value)
+        
+        for i in range(len(ids_sorted_decreasing)):
+            row = batch[ids_sorted_decreasing[i]]
+            feature = row["mhubert_ref"]
+            feature_padded[i, :feature.size(0)] = feature
+            feature_lengths[i] = feature.size(0)
+        
+        return {"mhubert_ref": feature_padded}
         
     def collect_enhubert_code(self, batch, ids_sorted_decreasing, pad_value = 511):
         return self.collect_1D_with_length(

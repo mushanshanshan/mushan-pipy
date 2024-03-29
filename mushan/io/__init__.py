@@ -33,6 +33,8 @@ def from_text(filename):
 def to_text(filename, data):
     with open(filename, "w", encoding='utf-8') as f:
         for d in data:
+            if len(data) > 1 and d[-1] != '\n':
+                d += '\n'
             f.write(d)
 
 def to_pickle(filename, data):
