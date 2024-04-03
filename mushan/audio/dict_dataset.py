@@ -170,13 +170,12 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             try:
                 audiopath, spk, dur, ori_text, pho = self.audiopaths_sid_text[i]
                 dur = float(dur)
-                total_dur += dur
+                
                 
                 if audiopath.split("/")[-1].split(".")[0] in blacklist:
                     continue
                 
                 val = True
-                
                 val = val and dur > self.min_audio_len and dur < self.max_audio_len
                 val = val and len(pho) > self.min_text_len and len(pho) < self.max_text_len
                 for filter_func in filter_funcs:
@@ -184,6 +183,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
                 
                 if val:
                     audiopaths_sid_text_new.append([audiopath, spk, dur, ori_text, pho])
+                    total_dur += dur
                     audio_lengths.append(dur)
                     text_lengths.append(len(pho))
                     self.ref_dict[spk].append(audiopath)
@@ -361,6 +361,13 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         data, sr = torchaudio.load(audiopath)
         return {"wave_audio": data.squeeze(0)}
     
+    def get_seg_wave_audio(self, audiopath_sid_text, seg = 9600):
+        audiopath, spk, dur, ori_text, text = audiopath_sid_text
+        data, sr = torchaudio.load(audiopath)
+        rand_idx = random.randint(0, data.shape[-1] - 9600)
+        data = data[:, rand_idx: rand_idx+9600]
+        return {"wave_audio": data.squeeze(0)}
+    
     def get_pad_wave_audio(self, audiopath_sid_text):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
         data, sr = torchaudio.load(audiopath)
@@ -376,6 +383,16 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
                 ".flac": ".linear"
             },
             return_key = "linear_spec",
+        )
+        
+    def get_240_mel_spec(self, audiopath_sid_text):
+        return self.torch_load_single(
+            audiopath_sid_text,
+            path_replaecments = {
+                "/wave/": "/feature/mel_spec/",
+                ".flac": ".240.mel"
+            },
+            return_key = "mel_spec",
         )
         
     def get_240_linear_spec(self, audiopath_sid_text):
@@ -488,6 +505,14 @@ class TextAudioSpeakerCollate():
             batch,
             ids_sorted_decreasing,
             feature_key = "linear_spec",
+            feature_dtype = torch.float
+        )
+        
+    def collect_240_mel_spec(self, batch, ids_sorted_decreasing):
+        return self.collect_2D_with_length(
+            batch,
+            ids_sorted_decreasing,
+            feature_key = "mel_spec",
             feature_dtype = torch.float
         )
         
@@ -647,7 +672,11 @@ class TextAudioSpeakerCollate():
         return {"wave_audio": wave_padded, 
                 "wave_audio_length": wave_lengths}
         
+        
     def collect_pad_wave_audio(self, batch, ids_sorted_decreasing):
+        return self.collect_wave_audio(batch, ids_sorted_decreasing)
+    
+    def collect_seg_wave_audio(self, batch, ids_sorted_decreasing):
         return self.collect_wave_audio(batch, ids_sorted_decreasing)
 
     def __call__(self, batch):
@@ -664,7 +693,7 @@ class TextAudioSpeakerCollate():
         
         # dim 0 排序
         if sort_key == None:
-            for i in ['phoneme']:
+            for i in ['phoneme', 'wave_audio', 'seg_wave_audio']:
                 if i in batch[0].keys():
                     sort_key = i
                     _, ids_sorted_decreasing = torch.sort(

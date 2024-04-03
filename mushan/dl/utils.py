@@ -377,7 +377,7 @@ def get_hparams(init=True):
     elif config.train.test:
         config.train.model_dir = f"./logs/test/"
     else:
-        config.train.model_dir = f"./logs/{config.train.logger_folder}/{config.train.tags}_{datetime.now().strftime('%m_%d_%H_%M')}/"
+        config.train.model_dir = f"./logs/{config.train.model}/{config.train.tags}/{datetime.now().strftime('%m_%d_%H_%M')}/"
 
     
     try:
