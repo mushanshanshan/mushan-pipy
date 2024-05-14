@@ -8,12 +8,16 @@ import torch
 import torch.utils.data
 import torchaudio
 import copy
+import pickle
+import redis
 from collections import defaultdict
 from loguru import logger
 from mushan.io import from_pickle, to_pickle
 from mushan.text.eng.front_end import Frontend as ENFrontend
 from mushan.text.chs.front_end import Frontend as CNFrontend
 from mushan.models.bigv.utils import bigv_mel
+from mushan.audio.hifi_mel import mel_spectrogram as hifi_mel_spectrogram
+from librosa.util import normalize
 
 def build_black_list(filename, key):
     key_black_list_path = f"/home/mushan/data/filelists/blacklists/{key}.pk"
@@ -61,8 +65,16 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         
         if tag == 'train':
             for i in config.train.train_filelists:
-                temp = load_filepaths_and_text(i)
-                self.audiopaths_sid_text += temp
+                if "*" in i:
+                    fls_list = glob(i)
+                    if self.rank == '0':
+                        logger.info(f"Got {len(fls_list)} filelists from {i}.")
+                    for _f in fls_list:
+                        temp = load_filepaths_and_text(_f)
+                        self.audiopaths_sid_text += temp
+                else:
+                    temp = load_filepaths_and_text(i)
+                    self.audiopaths_sid_text += temp
                 if self.rank == '0':
                     logger.info(f"Added train file : {i}, length : {len(temp)}")
         elif tag == 'eval':
@@ -133,10 +145,32 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             self.frontend = ENFrontend()
             
         self.symbols_len = self.frontend.symbols_len
+        
+        if "redis" in self.optinal.keys():
+            if self.rank == 0:
+                logger.info(f"Using Redis as port {self.optinal['redis']}")
+                
+            self.redis = redis.Redis(host='localhost', port=self.optinal['redis'], db=0)
+        else:
+            self.redis = None
             
         random.seed(1234)
         random.shuffle(self.audiopaths_sid_text)
         self._filter()
+        self._repeat()
+        
+        
+    def _repeat(self):
+        """
+        repeat filelist
+        """
+        if "repeat" in self.optinal.keys():
+            ori_length = len(self.audiopaths_sid_text)
+            self.audiopaths_sid_text = self.audiopaths_sid_text * self.optinal['repeat']
+            self.audio_lengths = self.audio_lengths * self.optinal['repeat']
+            self.text_lengths = self.text_lengths * self.optinal['repeat']
+            if self.rank == 0:
+                logger.info(f"Repeat dataset from {ori_length} to {len(self.audiopaths_sid_text)}")
 
         
     def _filter(self):
@@ -154,6 +188,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         filter_funcs = []
         total_dur = 0
         blacklist = set()
+        ori_data_length = len(self.audiopaths_sid_text)
         
         for key in self.data_list: 
             filter_func = getattr(self, f"filter_{key}", None)
@@ -198,7 +233,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         self.audio_lengths = audio_lengths
         self.text_lengths = text_lengths
         if self.rank == 0:
-            logger.info(f"Avaliable data length: {len(self.audiopaths_sid_text)} | {int(total_dur/60/60)} hours")
+            logger.info(f"Avaliable data length: {len(self.audiopaths_sid_text)}/{ori_data_length} | {int(total_dur/60/60)} hours")
             
     def torch_load_single(self, audiopath_sid_text, path_replaecments, return_key, post_process = []):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
@@ -230,8 +265,25 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         
         return {"hubert_code": hu, "hubert_dur": dur}
     
-
+    def get_mms_feature_48(self, audiopath_sid_text, post_fix = ".48"):
+        audiopath, spk, dur, ori_text, text = audiopath_sid_text
+        mms_file = audiopath.replace("/wave/", "/feature/mms/").replace(".flac", post_fix)
+        seg_length = self.optinal['mms_seg_size']
+        
+        # data = torch.load(mms_file, mmap=True)
+        if self.redis != None:
+            k = mms_file.split("/")[-1].split(".")[0]
+            data = pickle.loads(self.redis.get(k))
+        else:
+            data = torch.load(mms_file, mmap=False)
+        rand_idx = random.randint(0, data.shape[-1] - seg_length)
+        data = data[:, rand_idx: rand_idx+seg_length]
+        return {"mms_feature_48": data}
     
+    def get_mms_feature_47(self, audiopath_sid_text):
+        res = self.get_mms_feature_48(audiopath_sid_text, post_fix = ".47")
+        return {"mms_feature_47": res['mms_feature_48']}
+
     def get_mhubert_code(self, audiopath_sid_text):
         return self.torch_load_single(
             audiopath_sid_text,
@@ -361,12 +413,44 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         data, sr = torchaudio.load(audiopath)
         return {"wave_audio": data.squeeze(0)}
     
-    def get_seg_wave_audio(self, audiopath_sid_text, seg = 9600):
+    def get_seg_wave_audio(self, audiopath_sid_text):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
         data, sr = torchaudio.load(audiopath)
-        rand_idx = random.randint(0, data.shape[-1] - 9600)
-        data = data[:, rand_idx: rand_idx+9600]
+        rand_idx = random.randint(0, data.shape[-1] - self.optinal['wave_seg_size'])
+        data = data[:, rand_idx: rand_idx+self.optinal['wave_seg_size']]
         return {"wave_audio": data.squeeze(0)}
+    
+    def get_voco_seg_wave_audio_with_mel(self, audiopath_sid_text):
+        audiopath, spk, dur, ori_text, text = audiopath_sid_text
+        audio, sr = torchaudio.load(audiopath)
+        audio = audio.squeeze(0).numpy()
+        audio = normalize(audio) * 0.95
+        audio = torch.FloatTensor(audio)
+        audio = audio.unsqueeze(0)
+        rand_idx = random.randint(0, audio.shape[-1] - self.optinal['wave_seg_size'])
+        audio = audio[:, rand_idx: rand_idx + self.optinal['wave_seg_size']]
+        mel = hifi_mel_spectrogram(audio, 
+                                   self.optinal['wave_seg_mel_n_fft'], 
+                                   self.optinal['wave_seg_mel_n_mel'],
+                                   self.optinal['wave_seg_mel_sr'], 
+                                   self.optinal['wave_seg_mel_hop_size'], 
+                                   self.optinal['wave_seg_mel_win_size'], 
+                                   self.optinal['wave_seg_mel_fmin'], 
+                                   self.optinal['wave_seg_mel_fmax'],
+                                   center=False)
+        loss_mel = hifi_mel_spectrogram(audio, 
+                            self.optinal['wave_seg_mel_n_fft'], 
+                            self.optinal['wave_seg_mel_n_mel'],
+                            self.optinal['wave_seg_mel_sr'], 
+                            self.optinal['wave_seg_mel_hop_size'], 
+                            self.optinal['wave_seg_mel_win_size'], 
+                            self.optinal['wave_seg_mel_fmin'], 
+                            self.optinal['wave_seg_mel_fmax_loss'],
+                            center=False)
+        audio = audio.squeeze(0)
+        mel = mel.squeeze(0)
+        loss_mel = mel.squeeze(0)
+        return {"wave_audio": audio, "mel_spec": mel, "loss_mel_spec": loss_mel}
     
     def get_pad_wave_audio(self, audiopath_sid_text):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
@@ -524,6 +608,24 @@ class TextAudioSpeakerCollate():
             feature_dtype = torch.float
         )
         
+        
+    def collect_mms_feature_48(self, batch, ids_sorted_decreasing):
+        return self.collect_2D_with_length(
+            batch,
+            ids_sorted_decreasing,
+            feature_key = "mms_feature_48",
+            feature_dtype = torch.float
+        )
+    
+    def collect_mms_feature_47(self, batch, ids_sorted_decreasing):
+        return self.collect_2D_with_length(
+            batch,
+            ids_sorted_decreasing,
+            feature_key = "mms_feature_47",
+            feature_dtype = torch.float
+        )
+        
+        
     def collect_mel_spec(self, batch, ids_sorted_decreasing):
         return self.collect_2D_with_length(
             batch,
@@ -678,12 +780,26 @@ class TextAudioSpeakerCollate():
     
     def collect_seg_wave_audio(self, batch, ids_sorted_decreasing):
         return self.collect_wave_audio(batch, ids_sorted_decreasing)
-
+    
+    def collect_nor_seg_wave_audio(self, batch, ids_sorted_decreasing):
+        return self.collect_wave_audio(batch, ids_sorted_decreasing)
+    
+    def collect_voco_seg_wave_audio_with_mel(self, batch, ids_sorted_decreasing):
+        res = self.collect_wave_audio(batch, ids_sorted_decreasing)
+        res.update(self.collect_mel_spec(batch, ids_sorted_decreasing))
+        res.update(self.collect_2D_with_length(
+            batch,
+            ids_sorted_decreasing,
+            feature_key = "loss_mel_spec",
+            feature_dtype = torch.float
+        ))
+        return res
+    
     def __call__(self, batch):
         sort_key = None
         res = {}
         
-        for i in ['mel_spec', 'linear_spec']:
+        for i in ['mel_spec', 'linear_spec', 'mms_feature_48']:
             if i in batch[0].keys():
                 sort_key = i
                 _, ids_sorted_decreasing = torch.sort(
@@ -726,8 +842,11 @@ class DistributedBucketSampler(torch.utils.data.distributed.DistributedSampler):
         self.lengths = dataset.audio_lengths
         self.batch_size = batch_size
         
-        self.min_len, self.max_len = boundaries
-        self.boundaries = list(range(self.min_len, self.max_len+1))
+        if len(boundaries) == 2:
+            self.min_len, self.max_len = boundaries
+            self.boundaries = list(range(self.min_len, self.max_len+1))
+        else:
+            self.boundaries = boundaries
   
         self.buckets, self.num_samples_per_bucket = self._create_buckets()
         self.total_size = sum(self.num_samples_per_bucket)
