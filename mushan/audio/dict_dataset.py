@@ -9,7 +9,7 @@ import torch.utils.data
 import torchaudio
 import copy
 import pickle
-import redis
+import lmdb 
 from collections import defaultdict
 from loguru import logger
 from mushan.io import from_pickle, to_pickle
@@ -146,13 +146,11 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             
         self.symbols_len = self.frontend.symbols_len
         
-        if "redis" in self.optinal.keys():
-            if self.rank == 0:
-                logger.info(f"Using Redis as port {self.optinal['redis']}")
-                
-            self.redis = redis.Redis(host='localhost', port=self.optinal['redis'], db=0)
+        self.lmdb_txn = None
+        if "lmdb_path" in self.optinal.keys():
+            self.lmdb_path = self.optinal["lmdb_path"]
         else:
-            self.redis = None
+            self.lmdb_path = None
             
         random.seed(1234)
         random.shuffle(self.audiopaths_sid_text)
@@ -265,15 +263,31 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         
         return {"hubert_code": hu, "hubert_dur": dur}
     
+    
+    def get_xlsr2b_feature_48(self, audiopath_sid_text, post_fix = ".48"):
+        audiopath, spk, dur, ori_text, text = audiopath_sid_text
+        mms_file = audiopath.replace("/wave/", "/feature/xlsr2b/").replace(".flac", post_fix)
+        seg_length = self.optinal['xlsr_seg_size']
+        
+
+        # data = torch.load(mms_file, mmap=True)
+        data = torch.load(mms_file, mmap=False)
+        rand_idx = random.randint(0, data.shape[-1] - seg_length)
+        data = data[:, rand_idx: rand_idx+seg_length]
+        return {"xlsr2b_feature_48": data}
+    
     def get_mms_feature_48(self, audiopath_sid_text, post_fix = ".48"):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
         mms_file = audiopath.replace("/wave/", "/feature/mms/").replace(".flac", post_fix)
         seg_length = self.optinal['mms_seg_size']
         
         # data = torch.load(mms_file, mmap=True)
-        if self.redis != None:
+        if self.lmdb_path != None:
+            if self.lmdb_txn == None:
+                env = lmdb.open(self.lmdb_path)
+                self.lmdb_txn = env.begin()
             k = mms_file.split("/")[-1].split(".")[0]
-            data = pickle.loads(self.redis.get(k))
+            data = pickle.loads(self.lmdb_txn.get(k.encode()))
         else:
             data = torch.load(mms_file, mmap=False)
         rand_idx = random.randint(0, data.shape[-1] - seg_length)
@@ -283,6 +297,10 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
     def get_mms_feature_47(self, audiopath_sid_text):
         res = self.get_mms_feature_48(audiopath_sid_text, post_fix = ".47")
         return {"mms_feature_47": res['mms_feature_48']}
+    
+    def get_mms_feature_45(self, audiopath_sid_text):
+        res = self.get_mms_feature_48(audiopath_sid_text, post_fix = ".45")
+        return {"mms_feature_45": res['mms_feature_48']}
 
     def get_mhubert_code(self, audiopath_sid_text):
         return self.torch_load_single(
@@ -608,6 +626,14 @@ class TextAudioSpeakerCollate():
             feature_dtype = torch.float
         )
         
+    def collect_xlsr2b_feature_48(self, batch, ids_sorted_decreasing):
+        return self.collect_2D_with_length(
+            batch,
+            ids_sorted_decreasing,
+            feature_key = "xlsr2b_feature_48",
+            feature_dtype = torch.float
+        )
+        
         
     def collect_mms_feature_48(self, batch, ids_sorted_decreasing):
         return self.collect_2D_with_length(
@@ -622,6 +648,14 @@ class TextAudioSpeakerCollate():
             batch,
             ids_sorted_decreasing,
             feature_key = "mms_feature_47",
+            feature_dtype = torch.float
+        )
+        
+    def collect_mms_feature_45(self, batch, ids_sorted_decreasing):
+        return self.collect_2D_with_length(
+            batch,
+            ids_sorted_decreasing,
+            feature_key = "mms_feature_45",
             feature_dtype = torch.float
         )
         
@@ -799,7 +833,7 @@ class TextAudioSpeakerCollate():
         sort_key = None
         res = {}
         
-        for i in ['mel_spec', 'linear_spec', 'mms_feature_48']:
+        for i in ['mel_spec', 'linear_spec', 'mms_feature_48', 'mms_feature_45', 'xlsr2b_feature_48']:
             if i in batch[0].keys():
                 sort_key = i
                 _, ids_sorted_decreasing = torch.sort(

@@ -67,6 +67,7 @@ mushan/models/encodec/quantization/ac.py
 mushan/models/encodec/quantization/core_vq.py
 mushan/models/encodec/quantization/vq.py
 mushan/models/hubert/__init__.py
+mushan/models/kmean/__init__.py
 mushan/models/modules/__init__.py
 mushan/models/modules/base.py
 mushan/models/modules/diffsinger_decoder.py
