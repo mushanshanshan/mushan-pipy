@@ -270,8 +270,8 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         seg_length = self.optinal['xlsr_seg_size']
         
 
-        # data = torch.load(mms_file, mmap=True)
-        data = torch.load(mms_file, mmap=False)
+        data = torch.load(mms_file, mmap=True)
+        # data = torch.load(mms_file, mmap=False)
         rand_idx = random.randint(0, data.shape[-1] - seg_length)
         data = data[:, rand_idx: rand_idx+seg_length]
         return {"xlsr2b_feature_48": data}

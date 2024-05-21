@@ -12,6 +12,26 @@ Classifier: Operating System :: OS Independent
 Requires-Python: >=3.6
 Description-Content-Type: text/markdown
 License-File: LICENSE
+Requires-Dist: Cython
+Requires-Dist: librosa
+Requires-Dist: matplotlib
+Requires-Dist: numpy
+Requires-Dist: phonemizer
+Requires-Dist: scipy
+Requires-Dist: tensorboard
+Requires-Dist: Unidecode
+Requires-Dist: p_tqdm
+Requires-Dist: varname
+Requires-Dist: tqdm
+Requires-Dist: loguru
+Requires-Dist: dotmap
+Requires-Dist: inflect
+Requires-Dist: encodec
+Requires-Dist: lhotse
+Requires-Dist: torchaudio
+Requires-Dist: pysptk
+Requires-Dist: fastdtw
+Requires-Dist: pyworld
 
 <!--
  * @Date: 2022-07-20 15:22:19

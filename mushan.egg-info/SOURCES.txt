@@ -55,6 +55,7 @@ mushan/models/encodec/compress.py
 mushan/models/encodec/distrib.py
 mushan/models/encodec/model.py
 mushan/models/encodec/msstftd.py
+mushan/models/encodec/py.typed
 mushan/models/encodec/utils.py
 mushan/models/encodec/modules/__init__.py
 mushan/models/encodec/modules/conv.py
@@ -74,6 +75,7 @@ mushan/models/modules/diffsinger_decoder.py
 mushan/models/modules/gard_tts_decoder.py
 mushan/models/modules/reflow.py
 mushan/models/modules/scaled_adam.py
+mushan/models/s0vq/__init__.py
 mushan/models/speaker_encoder/EPACA_TDNN.py
 mushan/models/speaker_encoder/__init__.py
 mushan/models/utmos/__init__.py
