@@ -31,6 +31,7 @@ def from_text(filename):
     return text
 
 def to_text(filename, data):
+    assert isinstance(filename, str)
     with open(filename, "w", encoding='utf-8') as f:
         for d in data:
             if len(data) > 1 and d[-1] != '\n':
@@ -38,11 +39,13 @@ def to_text(filename, data):
             f.write(d)
 
 def to_pickle(filename, data):
+    assert isinstance(filename, str)
     with open(filename, "wb") as f:
         pickle.dump(data, f)
         
         
 def to_lil(filename, data, tick_power=-5):
+    assert isinstance(filename, str)
     with open(filename, "wb") as f:
         f.write(lilcom.compress(data, tick_power=tick_power))
         
@@ -54,6 +57,7 @@ def from_lil(filename):
 
 
 def to_lzma(filename, data):
+    assert isinstance(filename, str)
     with lzma.open(filename, "wb") as f:
         pickle.dump(data, f)
         
