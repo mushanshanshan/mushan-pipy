@@ -1,4 +1,4 @@
-from .cleaners import english_cleaners_to_phoneme
+from .cleaners import english_cleaners_to_phoneme, english_cleaners_wo_pho
 from .symbols import symbol_to_id
 import torch
 
@@ -11,6 +11,11 @@ class Frontend():
         result = [item] * (len(seq) * 2 + 1)
         result[1::2] = seq
         return result
+    
+    def textonly_to_idx(self, text, add_blank=False):
+        text = english_cleaners_wo_pho(text)
+        sequence = self.pho_to_idx(text, add_blank=add_blank)
+        return sequence
     
     def text_to_pho(self, text):
         text = english_cleaners_to_phoneme(text)

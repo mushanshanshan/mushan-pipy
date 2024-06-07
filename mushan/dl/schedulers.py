@@ -11,6 +11,34 @@ import logging
 import random
 from collections import defaultdict
 from typing import Dict, List, Optional, Tuple, Union
+from torch.optim.lr_scheduler import ExponentialLR
+
+
+class ExpLR:
+    def __init__(self, optimizer, final_epoch, decay_factor):
+        self.optimizer = optimizer
+        self.final_epoch = final_epoch
+        self.decay_factor = decay_factor
+        self.gamma = self._calculate_gamma()
+        self.scheduler = ExponentialLR(optimizer, gamma=self.gamma)
+
+    def _calculate_gamma(self):
+        return self.decay_factor ** (1 / self.final_epoch)
+
+    def step_epoch(self):
+        self.scheduler.step()
+
+    def step_batch(self):
+        pass  # This method intentionally does nothing
+    
+    def state_dict(self):
+        """Returns the state of the scheduler as a dictionary."""
+        return self.scheduler.state_dict()
+
+    def load_state_dict(self, state_dict):
+        """Loads the scheduler's state."""
+        self.scheduler.load_state_dict(state_dict)
+
 
 class LRScheduler(object):
     """
