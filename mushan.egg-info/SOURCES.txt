@@ -38,6 +38,8 @@ mushan/loss/__init__.py
 mushan/ml/__init__.py
 mushan/ml/func.py
 mushan/models/__init__.py
+mushan/models/bigs/__init__.py
+mushan/models/bigs/model.py
 mushan/models/bigv/__init__.py
 mushan/models/bigv/bigv.py
 mushan/models/bigv/utils.py

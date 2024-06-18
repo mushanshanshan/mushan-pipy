@@ -210,7 +210,13 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             logger.info(f"Rank {self.rank} start processing filelists...")
         for i in tqdm(range(len(self.audiopaths_sid_text)), disable=self.rank != 0):
             try:
-                audiopath, spk, dur, ori_text, pho = self.audiopaths_sid_text[i]
+                if len(self.audiopaths_sid_text[i]) == 5:
+                    audiopath, spk, dur, ori_text, pho = self.audiopaths_sid_text[i]
+                elif len(self.audiopaths_sid_text[i]) == 4:
+                    audiopath, spk, dur, ori_text = self.audiopaths_sid_text[i]
+                    pho = '_'
+                else:
+                    continue
                 dur = float(dur)
 
                 if audiopath.split("/")[-1].split(".")[0] in blacklist:
@@ -265,11 +271,14 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             data = function(data)
 
         return {return_key: data}
+    
+    def get_dummy(self, audiopath_sid_text):
+        return {}
 
     def get_audiopath(self, audiopath_sid_text):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
 
-        return {"audio_path": audiopath}
+        return {"audio_path": audiopath.replace('/home/mushan/data/wave/', '')}
 
     def get_hubert(self, audiopath_sid_text):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
@@ -370,13 +379,20 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             },
             return_key="mms_code",
         )['mms_code']
-        data = data.repeat_interleave(2, dim=0)
-        seg_length = self.optional['mms_seg_size'] * 2
-        rand_idx = random.randint(0, data.shape[-1] - seg_length - 1)
-        self.temp_arg = rand_idx
-        # print(f"MMS_{audiopath_sid_text[0]}_{data.shape}_{rand_idx}_{rand_idx+seg_length}")
+        if 'double_mms_code' in self.optional.keys() and self.optional['double_mms_code']:
+            data = data.repeat_interleave(2, dim=0)
+            seg_length = self.optional['mms_seg_size'] * 2
+            rand_idx = random.randint(0, data.shape[-1] - seg_length - 1)
+            self.temp_arg = rand_idx
+            # print(f"MMS_{audiopath_sid_text[0]}_{data.shape}_{rand_idx}_{rand_idx+seg_length}")
 
-        data = data[rand_idx: rand_idx+seg_length]
+            data = data[rand_idx: rand_idx+seg_length]
+        else:
+            seg_length = self.optional['mms_seg_size']
+            rand_idx = random.randint(0, data.shape[-1] - seg_length - 1)
+            self.temp_arg = rand_idx
+            # print(f"MMS_{audiopath_sid_text[0]}_{data.shape}_{rand_idx}_{rand_idx+seg_length}")
+            data = data[rand_idx: rand_idx+seg_length]
 
         return {"mms_code": data}
 
@@ -501,6 +517,23 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         data.update(self.get_mms_code(audiopath_sid_text))
         data.update(self.get_text(audiopath_sid_text))
         return data
+    
+    def get_mms_pretrain(self, audiopath_sid_text):
+        data = {}
+        data.update(self.get_mms_code(audiopath_sid_text))
+        code = data['mms_code']
+        original_tensor = [original_tensor[0].item()]
+
+        # 遍历原始 tensor，从第二个元素开始
+        for i in range(1, len(original_tensor)):
+            if original_tensor[i] != original_tensor[i - 1]:
+                result_list.append(original_tensor[i].item())
+
+        # 转换结果列表为 tensor
+        result_tensor = torch.tensor(result_list)
+        
+        data.update(self.get_text(audiopath_sid_text))
+        return data
         
 
     def get_mel_ref(self, audiopath_sid_text):
@@ -525,7 +558,10 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         assert os.path.exists(spec_filename), spec_filename
 
         spec = torch.load(spec_filename, map_location='cpu')
-
+        if "mel_spec_160_seg_len" in self.optional.keys() and spec.shape[-1] > self.optional["mel_spec_160_seg_len"]:
+            ref_rand_start = random.randint(0, spec.shape[-1] - self.optional["mel_spec_160_seg_len"] - 1) 
+            ref_end = ref_rand_start + self.optional["mel_spec_160_seg_len"]
+            spec = spec[:, ref_rand_start:ref_end]
         if "mel_spec_160_seg_mean" in self.optional.keys():
             spec = (spec - self.optional["mel_spec_160_seg_mean"]
                     ) / self.optional["mel_spec_160_seg_std"]
@@ -838,6 +874,18 @@ class TextAudioSpeakerCollate():
             feature_dtype=torch.float
         )
 
+    def collect_audiopath(self, batch, ids_sorted_decreasing):
+        info = []
+
+        for i in range(len(ids_sorted_decreasing)):
+            row = batch[ids_sorted_decreasing[i]]
+            info.append(row["audio_path"])
+
+        return {"audio_path": info}
+    
+    def collect_dummy(self, batch, ids_sorted_decreasing):
+        return {}
+    
     def collect_mel_ref(self, batch, ids_sorted_decreasing):
         max_ref_len = max([x["mel_ref"].size(1) for x in batch])
         ref_padded = torch.FloatTensor(
@@ -1077,7 +1125,7 @@ class TextAudioSpeakerCollate():
 
         # dim 0 排序
         if sort_key == None:
-            for i in ['text', 'phoneme', 'wave_audio', 'seg_wave_audio']:
+            for i in ['text', 'phoneme', 'wave_audio', 'seg_wave_audio', 'mms_code_seg']:
                 if i in batch[0].keys():
                     sort_key = i
                     _, ids_sorted_decreasing = torch.sort(
