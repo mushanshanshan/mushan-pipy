@@ -414,6 +414,17 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             },
             return_key="mms_code",
         )
+        
+    def get_mms_code_pad_seg(self, audiopath_sid_text):
+        return self.torch_load_single(
+            audiopath_sid_text,
+            path_replaecments={
+                "/wave/": "/feature/mms/",
+                ".flac": self.optional['mms_code_postfix']
+                # ".flac": ".align.code"
+            },
+            return_key="mms_code",
+        )
 
     def get_mms_code_seg(self, audiopath_sid_text):
         data = self.torch_load_single(
@@ -999,28 +1010,38 @@ class TextAudioSpeakerCollate():
         )
 
     def collect_mms_code(self, batch, ids_sorted_decreasing, pad_value=2057):
-        data = self.collect_1D_with_length(
+        return self.collect_1D_with_length(
             batch,
             ids_sorted_decreasing,
             feature_key="mms_code",
             pad_value=pad_value,
             feature_dtype=torch.long
         )
-        if 'mms_seg_size' in self.optional.keys():
-            tar_len = self.optional['mms_seg_size']
-            if data['mms_code'].shape[-1] <= tar_len:
-                return data
-            else:
-                rand_start = random.randint(0, data['mms_code'].shape[-1]-tar_len)
-                mms_code = data['mms_code'][:, rand_start:rand_start+tar_len]
-                mms_code_length = torch.full((mms_code.shape[0],), tar_len, dtype=torch.long)
-                
-                return {
-                    "mms_code": mms_code,
-                    "mms_code_length": mms_code_length
-                }
+        
+    def collect_mms_code_pad_seg(self, batch, ids_sorted_decreasing, pad_value=2057):
+        feature_key = "mms_code"
+        
+        max_feature_len = max([len(x[feature_key]) for x in batch])
+        feature_lengths = torch.LongTensor(len(batch))
+        feature_padded = torch.LongTensor(len(batch), max_feature_len)
+
+        feature_padded.fill_(pad_value)
+
+        for i in range(len(ids_sorted_decreasing)):
+            row = batch[ids_sorted_decreasing[i]]
+            feature = row[feature_key]
+            feature_padded[i, :feature.size(0)] = feature
+            feature_lengths[i] = feature.size(0)
+            
+        if max_feature_len <= self.optional['mms_seg_size']:
+            return {feature_key: feature_padded,
+                    f"{feature_key}_length": feature_lengths}
         else:
-            return data
+            randstart = random.randint(0, max_feature_len - self.optional['mms_seg_size'])
+            feature_seg = feature_padded[:, randstart:randstart+self.optional['mms_seg_size']].clone()
+            feature_lengths.fill_(self.optional['mms_seg_size'])
+            return {feature_key: feature_seg,
+                    f"{feature_key}_length": feature_lengths}
 
     def collect_mms_code_seg(self, batch, ids_sorted_decreasing, pad_value=4100):
         return self.collect_1D_with_length(
