@@ -1012,9 +1012,13 @@ class TextAudioSpeakerCollate():
                 return data
             else:
                 rand_start = random.randint(0, data['mms_code'].shape[-1]-tar_len)
-                data['mms_code'] = data['mms_code'][:, rand_start:rand_start+tar_len]
-                data['mms_code_length'] = torch.ones(data['mms_code'].shape[0], dtype = torch.long) * tar_len
-                return data
+                mms_code = data['mms_code'][:, rand_start:rand_start+tar_len]
+                mms_code_length = torch.full(mms_code_seg.shape[0], tar_len, dtype=torch.long)
+                
+                return {
+                    "mms_code": mms_code,
+                    "mms_code_length": mms_code_length
+                }
         else:
             return data
 
