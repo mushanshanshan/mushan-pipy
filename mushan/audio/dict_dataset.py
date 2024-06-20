@@ -19,7 +19,6 @@ from mushan.models.bigv.utils import bigv_mel
 from mushan.audio.hifi_mel import mel_spectrogram as hifi_mel_spectrogram
 from librosa.util import normalize
 
-
 def build_black_list(filename, key):
     key_black_list_path = f"/home/mushan/data/filelists/blacklists/{key}.pk"
     if os.path.exists(key_black_list_path):
@@ -120,6 +119,11 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         self.need_text = any("text" in i for i in self.data_list)
         self.need_phoneme = any("phoneme" in i for i in self.data_list)
         
+        if 'text_to_id_map' in self.optional.keys():
+            self.text_to_id_map = self.optional['text_to_id_map']
+        else:
+            self.text_to_id_map = None
+            
         self.dataset_lang_map = {
             'cmhq': 'english',
             'lib': 'english',
@@ -135,14 +139,14 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         }
 
         self.language_map = {
-            'english': 0,
-            'dutch': 1,
-            'french': 2,
-            'german': 3,
-            'italian': 4,
-            'polish': 5,
-            'portuguese': 6,
-            'spanish': 7,
+            'english': 10,
+            'dutch': 11,
+            'french': 12,
+            'german': 13,
+            'italian': 14,
+            'polish': 15,
+            'portuguese': 16,
+            'spanish': 17,
         }
 
         if config.data.language == 'ch':
@@ -160,11 +164,30 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         else:
             self.lmdb_path = None
 
+        
         self.temp_arg = None
         random.seed(1234)
         random.shuffle(self.audiopaths_sid_text)
         self._filter()
         self._repeat()
+        
+    def _intersperse(self, seq, item):
+        result = [item] * (len(seq) * 2 + 1)
+        result[1::2] = seq
+        return result
+        
+    def _text_to_idx(self, text, add_blank=False, inter_item = 0):
+        assert self.text_to_id_map != None
+        sequence = []
+        for symbol in pho:
+            symbol_id = self.text_to_id_map[symbol]
+            sequence += [symbol_id]
+        
+        if add_blank:
+            sequence = self._intersperse(sequence, inter_item)
+        
+        sequence = torch.LongTensor(sequence)
+        return sequence
 
     def _repeat(self):
         """
@@ -196,6 +219,8 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         total_dur = 0
         blacklist = set()
         ori_data_length = len(self.audiopaths_sid_text)
+        
+        dataset_counter = defaultdict(int)
 
         for key in self.data_list:
             filter_func = getattr(self, f"filter_{key}", None)
@@ -224,14 +249,20 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
 
                 val = True
                 val = val and dur > self.min_audio_len and dur < self.max_audio_len
-                val = val and len(pho) > self.min_text_len and len(
-                    pho) < self.max_text_len
+                
+                if pho != '_':
+                    val = val and len(pho) > self.min_text_len and len(
+                        pho) < self.max_text_len
+                else:
+                    val = val and len(ori_text) > self.min_text_len and len(
+                        ori_text) < self.max_text_len
+                    
                 for filter_func in filter_funcs:
                     val = val and filter_func(
                         audiopath, spk, dur, ori_text, pho)
 
                 if val:
-
+                    dataset_counter[audiopath.split("/")[5]] += 1
                     if not self.need_text:
                         ori_text = " "
                     if not self.need_phoneme:
@@ -250,6 +281,8 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
 
         if self.rank == 0 and len(missing_file) > 0:
             logger.error(f"Missing data index: {missing_file}")
+        if self.rank == 0:
+            logger.info(f"Dataset counter: {dataset_counter}")
         self.audiopaths_sid_text = audiopaths_sid_text_new
         self.audio_lengths = audio_lengths
         self.text_lengths = text_lengths
@@ -274,6 +307,19 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
     
     def get_dummy(self, audiopath_sid_text):
         return {}
+    
+    
+    def get_language_idx(self, audiopath_sid_text):
+        audiopath, spk, dur, ori_text, text = audiopath_sid_text
+        
+        if '/libri_16/' in audiopath:
+            lang_id =  self.language_map['english']
+        elif 'mls' in audiopath:
+            lang_id = audiopath.split('/')[-5]
+            lang_id = self.language_map[lang_id]
+        else:
+            lang_id = 0
+        return {'language_idx': lang_id}
 
     def get_audiopath(self, audiopath_sid_text):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
@@ -458,18 +504,6 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
 
         return {"phoneme": pho, "robert_feature": robert_feature}
 
-    def get_language_idx(self, audiopath_sid_text):
-        audiopath, spk, dur, ori_text, text = audiopath_sid_text
-        lang_idx = -1
-
-        for k, v in self.dataset_lang_map.items():
-            if k in audiopath:
-                lang_idx = self.language_map[v]
-                break
-
-        assert lang_idx != -1
-        return {"language_idx": lang_idx}
-
     def get_mel_spec(self, audiopath_sid_text):
         return self.torch_load_single(
             audiopath_sid_text,
@@ -586,6 +620,11 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
     def get_text(self, audiopath_sid_text):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
         text_norm = self.frontend.textonly_to_idx(ori_text)
+        return {"text": text_norm}
+    
+    def get_custom_text(self, audiopath_sid_text):
+        audiopath, spk, dur, ori_text, text = audiopath_sid_text
+        text_norm = self._text_to_idx(ori_text)
         return {"text": text_norm}
 
     def get_phoneme(self, audiopath_sid_text):
@@ -960,13 +999,24 @@ class TextAudioSpeakerCollate():
         )
 
     def collect_mms_code(self, batch, ids_sorted_decreasing, pad_value=2057):
-        return self.collect_1D_with_length(
+        data = self.collect_1D_with_length(
             batch,
             ids_sorted_decreasing,
             feature_key="mms_code",
             pad_value=pad_value,
             feature_dtype=torch.long
         )
+        if 'mms_seg_size' in self.optional.keys():
+            tar_len = self.optional['mms_seg_size']
+            if data['mms_code'].shape[-1] <= tar_len:
+                return data
+            else:
+                rand_start = random.randint(0, data['mms_code'].shape[-1]-tar_len)
+                data['mms_code'] = data['mms_code'][:, rand_start:rand_start+tar_len]
+                data['mms_code_length'] = torch.ones(data['mms_code'].shape[0], dtype = torch.long) * tar_len
+                return data
+        else:
+            return data
 
     def collect_mms_code_seg(self, batch, ids_sorted_decreasing, pad_value=4100):
         return self.collect_1D_with_length(
@@ -1048,6 +1098,9 @@ class TextAudioSpeakerCollate():
 
         return {"text": pho_padded,
                 "text_length": pho_lengths}
+        
+    def collect_custom_text(self, batch, ids_sorted_decreasing):
+        return self.collect_text(batch, ids_sorted_decreasing)
 
     def collect_phoneme(self, batch, ids_sorted_decreasing):
         max_pho_len = max([len(x['phoneme']) for x in batch])
@@ -1125,7 +1178,7 @@ class TextAudioSpeakerCollate():
 
         # dim 0 排序
         if sort_key == None:
-            for i in ['text', 'phoneme', 'wave_audio', 'seg_wave_audio', 'mms_code_seg']:
+            for i in ['text', 'phoneme', 'wave_audio', 'seg_wave_audio', 'mms_code_seg', 'mms_code']:
                 if i in batch[0].keys():
                     sort_key = i
                     _, ids_sorted_decreasing = torch.sort(
