@@ -1023,7 +1023,7 @@ class TextAudioSpeakerCollate():
         
         max_feature_len = max([len(x[feature_key]) for x in batch])
         feature_lengths = torch.LongTensor(len(batch))
-        feature_padded = torch.LongTensor(len(batch), max_feature_len)
+        feature_padded = torch.LongTensor(len(batch), max(max_feature_len, self.optional['mms_seg_size']))
 
         feature_padded.fill_(pad_value)
 
