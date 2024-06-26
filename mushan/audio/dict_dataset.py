@@ -17,6 +17,7 @@ from mushan.text.eng.front_end import Frontend as ENFrontend
 from mushan.text.chs.front_end import Frontend as CNFrontend
 from mushan.models.bigv.utils import bigv_mel
 from mushan.audio.hifi_mel import mel_spectrogram as hifi_mel_spectrogram
+from mushan.audio.lang_info import mls_language_map, fleurs_language_map
 from librosa.util import normalize
 
 def build_black_list(filename, key):
@@ -140,14 +141,11 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
 
         self.language_map = {
             'english': 10,
-            'dutch': 11,
-            'french': 12,
-            'german': 13,
-            'italian': 14,
-            'polish': 15,
-            'portuguese': 16,
-            'spanish': 17,
         }
+        self.language_map.update(mls_language_map)
+        self.language_map.update(fleurs_language_map)
+        
+        self.language_class = max(list(self.language_map.values()))
 
         if config.data.language == 'ch':
             self.language = 'ch'
@@ -314,8 +312,11 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         
         if '/libri_16/' in audiopath:
             lang_id =  self.language_map['english']
-        elif 'mls' in audiopath:
+        elif '/mls_16/' in audiopath:
             lang_id = audiopath.split('/')[-5]
+            lang_id = self.language_map[lang_id]
+        elif '/fleurs_16/' in audiopath:
+            lang_id = audiopath.split('/')[-3]
             lang_id = self.language_map[lang_id]
         else:
             lang_id = 0
@@ -592,6 +593,28 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
 
         spec = torch.load(spec_filename, map_location='cpu')
         return {"mel_ref": spec}
+    
+    def get_club(self, audiopath_sid_text, l = 480, pad_value = 0):
+        if 'club_loop_num' in self.optional.keys():
+            n = self.optional['club_loop_num']
+        else:
+            n = 4
+        
+        feature_padded = torch.FloatTensor(n, 80, l)
+        feature_padded.fill_(pad_value)
+
+        for i in range(n):
+            pt = random.choice(self.audiopaths_sid_text)
+            feature = torch.load(pt[0].replace("/wave/", "/feature/mel_spec/").replace(".flac", f".160"))
+            if feature.shape[-1] > l:
+                start_idx = random.randint(0, feature.shape[-1] - l - 1)
+                feature = feature[:, start_idx: start_idx + l]
+                feature_padded[i, :, :] = feature
+            else:
+                cur_l = feature.shape[-1]
+                feature_padded[i, :, :cur_l] = feature
+                
+        return {"club": feature_padded}
 
     def get_mel_160_ref(self, audiopath_sid_text):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
@@ -805,9 +828,13 @@ class TextAudioSpeakerCollate():
         return {feature_key: feature_padded,
                 f"{feature_key}_length": feature_lengths}
 
-    def collect_1D_with_length(self, batch, ids_sorted_decreasing, feature_key, pad_value=0, feature_dtype=torch.float):
+    def collect_1D_with_length(self, batch, ids_sorted_decreasing, feature_key, pad_value=0, feature_dtype=torch.float, one_more_pad = False):
 
         max_feature_len = max([len(x[feature_key]) for x in batch])
+        
+        if one_more_pad:
+            max_feature_len += 1
+            
         feature_lengths = torch.LongTensor(len(batch))
 
         if feature_dtype == torch.float or feature_dtype == torch.float32:
@@ -1015,7 +1042,8 @@ class TextAudioSpeakerCollate():
             ids_sorted_decreasing,
             feature_key="mms_code",
             pad_value=pad_value,
-            feature_dtype=torch.long
+            feature_dtype=torch.long,
+            one_more_pad = True
         )
         
     def collect_mms_code_pad_seg(self, batch, ids_sorted_decreasing, pad_value=2057):
@@ -1060,6 +1088,11 @@ class TextAudioSpeakerCollate():
             pad_value=pad_value,
             feature_dtype=torch.long
         )
+        
+    def collect_club(self, batch, ids_sorted_decreasing):
+        features = torch.stack([batch[ids_sorted_decreasing[i]]['club'] for i in range(len(ids_sorted_decreasing))])
+        features = features.reshape(features.shape[0] * features.shape[1], features.shape[2], features.shape[3])
+        return {'club': features}
 
     def collect_mhubert_ref(self, batch, ids_sorted_decreasing, pad_value=1025):
         max_feature_len = max([len(x["mhubert_ref"]) for x in batch]) + 1

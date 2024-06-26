@@ -18,6 +18,7 @@ mushan/audio/dataset.py
 mushan/audio/dict_dataset.py
 mushan/audio/encodrc.py
 mushan/audio/hifi_mel.py
+mushan/audio/lang_info.py
 mushan/audio/lhotse.py
 mushan/audio/mcd.py
 mushan/audio/plot.py

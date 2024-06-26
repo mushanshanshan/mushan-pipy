@@ -1,1 +1,1 @@
-from .EPACA_TDNN import EPACA_TDNN
+from .EPACA_TDNN import *
