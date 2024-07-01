@@ -355,18 +355,13 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         mms_file = audiopath.replace(
             "/wave/", "/feature/mms/").replace(".flac", post_fix)
         seg_length = self.optional['mms_seg_size']
-
-        # data = torch.load(mms_file, mmap=True)
-        if self.lmdb_path != None:
-            if self.lmdb_txn == None:
-                env = lmdb.open(self.lmdb_path)
-                self.lmdb_txn = env.begin()
-            k = mms_file.split("/")[-1].split(".")[0]
-            data = pickle.loads(self.lmdb_txn.get(k.encode()))
-        else:
-            data = torch.load(mms_file, mmap=True)
+        
+        data = torch.load(mms_file, mmap=True)
         rand_idx = random.randint(0, data.shape[-1] - seg_length)
         data = data[:, rand_idx: rand_idx+seg_length]
+        if 'mms_mean' in self.optional.keys():
+            data = (data - self.optional['mms_mean']) / self.optional['mms_std']
+            
         return {"mms_feature_48": data}
 
     def get_mms_feature_47(self, audiopath_sid_text):
@@ -380,6 +375,10 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
     def get_mms_feature_44(self, audiopath_sid_text):
         res = self.get_mms_feature_48(audiopath_sid_text, post_fix=".44")
         return {"mms_feature_44": res['mms_feature_48']}
+    
+    def get_mms_feature_44b(self, audiopath_sid_text):
+        res = self.get_mms_feature_48(audiopath_sid_text, post_fix=".44b")
+        return {"mms_feature_44b": res['mms_feature_48']}
 
     def get_mms_44_seg(self, audiopath_sid_text):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
@@ -393,7 +392,17 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         data = data[:, rand_idx: rand_idx+seg_length]
 
         return {"mms_44_seg": data}
-
+    
+    def get_mms_rvq_code(self, audiopath_sid_text):
+        audiopath, spk, dur, ori_text, text = audiopath_sid_text
+        mms_file = audiopath.replace(
+            "/wave/", "/feature/mms/").replace(".flac", self.optional['mms_rvq_code_postfix'])
+        data = torch.load(mms_file, mmap=True, map_location='cpu').transpose(0,1)
+        return {"mms_rvq_code": data}
+    
+    def get_mms_rvq_code_pad_seg(self, audiopath_sid_text):
+        return self.get_mms_rvq_code(audiopath_sid_text)
+        
     def get_mhubert_code(self, audiopath_sid_text):
         return self.torch_load_single(
             audiopath_sid_text,
@@ -854,6 +863,15 @@ class TextAudioSpeakerCollate():
 
         return {feature_key: feature_padded,
                 f"{feature_key}_length": feature_lengths}
+        
+    def collect_mms_rvq_code(self, batch, ids_sorted_decreasing):
+        return self.collect_2D_with_length(
+            batch,
+            ids_sorted_decreasing,
+            feature_key="mms_rvq_code",
+            feature_dtype=torch.long,
+            pad_value = -1
+        )
 
     def collect_linear_spec(self, batch, ids_sorted_decreasing):
         return self.collect_2D_with_length(
@@ -900,6 +918,14 @@ class TextAudioSpeakerCollate():
             batch,
             ids_sorted_decreasing,
             feature_key="mms_feature_44",
+            feature_dtype=torch.float
+        )
+        
+    def collect_mms_feature_44b(self, batch, ids_sorted_decreasing):
+        return self.collect_2D_with_length(
+            batch,
+            ids_sorted_decreasing,
+            feature_key="mms_feature_44b",
             feature_dtype=torch.float
         )
 
@@ -1026,6 +1052,9 @@ class TextAudioSpeakerCollate():
                 'num_last_tokens': max_data_length - min(text_lengths),
                 "mms_code_length": mms_code_length,
                 "text_lengths": text_lengths}
+        
+    def collect_mms_rvq_code_pad_seg(self, batch, ids_sorted_decreasing, pad_value=1025):
+        return None
 
     def collect_hubert_code(self, batch, ids_sorted_decreasing, pad_value=1025):
         return self.collect_1D_with_length(
@@ -1226,7 +1255,7 @@ class TextAudioSpeakerCollate():
         sort_key = None
         res = {}
 
-        for i in ['mel_spec', 'mel_spec_160', 'linear_spec', 'mms_feature_48', 'mms_feature_44', 'xlsr2b_feature_48']:
+        for i in ['mel_spec', 'mel_spec_160', 'linear_spec', 'mms_feature_44b', 'mms_feature_44', 'xlsr2b_feature_48']:
             if i in batch[0].keys():
                 sort_key = i
                 _, ids_sorted_decreasing = torch.sort(

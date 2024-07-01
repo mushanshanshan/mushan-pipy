@@ -12,7 +12,7 @@ class AttrDict(dict):
 def load_checkpoint(filepath):
     assert os.path.isfile(filepath)
     print("Loading '{}'".format(filepath))
-    checkpoint_dict = torch.load(filepath)
+    checkpoint_dict = torch.load(filepath, map_location='cpu')
     print("Complete.")
     return checkpoint_dict
 
