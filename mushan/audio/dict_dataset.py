@@ -870,7 +870,7 @@ class TextAudioSpeakerCollate():
             ids_sorted_decreasing,
             feature_key="mms_rvq_code",
             feature_dtype=torch.long,
-            pad_value = -1
+            pad_value = 1025
         )
 
     def collect_linear_spec(self, batch, ids_sorted_decreasing):
