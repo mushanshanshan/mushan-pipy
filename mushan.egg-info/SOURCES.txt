@@ -80,6 +80,7 @@ mushan/models/modules/gard_tts_decoder.py
 mushan/models/modules/reflow.py
 mushan/models/modules/scaled_adam.py
 mushan/models/s0vq/__init__.py
+mushan/models/s0vq/with_loss.py
 mushan/models/speaker_encoder/EPACA_TDNN.py
 mushan/models/speaker_encoder/__init__.py
 mushan/models/utmos/__init__.py

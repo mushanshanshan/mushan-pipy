@@ -19,6 +19,7 @@ from mushan.models.bigv.utils import bigv_mel
 from mushan.audio.hifi_mel import mel_spectrogram as hifi_mel_spectrogram
 from mushan.audio.lang_info import mls_language_map, fleurs_language_map
 from librosa.util import normalize
+from einops import rearrange, repeat, reduce
 
 def build_black_list(filename, key):
     key_black_list_path = f"/home/mushan/data/filelists/blacklists/{key}.pk"
@@ -397,7 +398,9 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
         mms_file = audiopath.replace(
             "/wave/", "/feature/mms/").replace(".flac", self.optional['mms_rvq_code_postfix'])
-        data = torch.load(mms_file, mmap=True, map_location='cpu').transpose(0,1)
+        data = torch.load(mms_file, mmap=True, map_location='cpu')
+        data = rearrange(data, 'g l q -> (q g) l')
+        
         return {"mms_rvq_code": data}
     
     def get_mms_rvq_code_pad_seg(self, audiopath_sid_text):
@@ -1054,7 +1057,17 @@ class TextAudioSpeakerCollate():
                 "text_lengths": text_lengths}
         
     def collect_mms_rvq_code_pad_seg(self, batch, ids_sorted_decreasing, pad_value=1025):
-        return None
+        data = self.collect_mms_rvq_code(batch, ids_sorted_decreasing)['mms_rvq_code']
+        bs, q, l = data.shape
+        
+        if l <= self.optional['mms_seg_size']:
+            pad_data = torch.LongTensor(bs, q, self.optional['mms_seg_size'])
+            pad_data.fill_(pad_value)
+            pad_data[:, :, :l] = data
+        else:
+            randstart = random.randint(0, l - self.optional['mms_seg_size'])
+            pad_data = data[:, :, randstart:randstart+self.optional['mms_seg_size']].clone()
+        return {'mms_rvq_code': pad_data}
 
     def collect_hubert_code(self, batch, ids_sorted_decreasing, pad_value=1025):
         return self.collect_1D_with_length(
