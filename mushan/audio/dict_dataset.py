@@ -127,7 +127,8 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             self.text_to_id_map = None
             
         if 'audio_length_balance_sample' in self.optional.keys():
-            self.audio_length_balance_sample = self.optional['text_to_id_map']
+            self.audio_length_balance_sample = self.optional['audio_length_balance_sample']
+            logger.info(f"Using audio length balancer, ratio: {str(self.audio_length_balance_sample)}")
         else:
             self.audio_length_balance_sample = -1
             
