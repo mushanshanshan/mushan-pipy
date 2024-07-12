@@ -276,7 +276,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
                     if self.audio_length_balance_sample == -1:
                         sample_times = 1
                     else:
-                        sample_times = max(1, dur // self.audio_length_balance_sample)
+                        sample_times = max(1, int(dur // self.audio_length_balance_sample))
                         
                     for _ in range(sample_times):
                         audiopaths_sid_text_new.append(
