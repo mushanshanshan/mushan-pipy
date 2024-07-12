@@ -71,6 +71,8 @@ mushan/models/encodec/quantization/__init__.py
 mushan/models/encodec/quantization/ac.py
 mushan/models/encodec/quantization/core_vq.py
 mushan/models/encodec/quantization/vq.py
+mushan/models/hifigan/__init__.py
+mushan/models/hifigan/mms.py
 mushan/models/hubert/__init__.py
 mushan/models/kmean/__init__.py
 mushan/models/modules/__init__.py
@@ -86,6 +88,7 @@ mushan/models/speaker_encoder/__init__.py
 mushan/models/utmos/__init__.py
 mushan/models/utmos/score.py
 mushan/models/vqs/__init__.py
+mushan/models/vqs/include_pre.py
 mushan/nb/__init__.py
 mushan/src/temp.txt
 mushan/text/__init__.py

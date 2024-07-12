@@ -405,6 +405,32 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
     
     def get_mms_rvq_code_pad_seg(self, audiopath_sid_text):
         return self.get_mms_rvq_code(audiopath_sid_text)
+    
+    def get_mms_rvq_code_seq(self, audiopath_sid_text):
+        data = self.get_mms_rvq_code(audiopath_sid_text)['mms_rvq_code']
+        # data = rearrange(data, 'q l ->l q')
+        # print(data.shape)
+        # print(self.optional)
+        if 'double_mms_code' in self.optional.keys() and self.optional['double_mms_code']:
+            data = data.repeat_interleave(2, dim=-1)
+            # print(data.shape)
+            seg_length = self.optional['mms_seg_size'] * 2
+            rand_idx = random.randint(0, data.shape[-1] - seg_length - 1)
+            self.temp_arg = rand_idx
+            if self.debug:
+                print(f'mms code: {rand_idx} -> {rand_idx+seg_length} of {data.shape[-1]}')
+            # print(f"MMS_{audiopath_sid_text[0]}_{data.shape}_{rand_idx}_{rand_idx+seg_length}")
+
+            data = data[:, rand_idx: rand_idx+seg_length]
+            # print(data.shape)
+        else:
+            seg_length = self.optional['mms_seg_size']
+            rand_idx = random.randint(0, data.shape[-1] - seg_length - 1)
+            self.temp_arg = rand_idx
+            # print(f"MMS_{audiopath_sid_text[0]}_{data.shape}_{rand_idx}_{rand_idx+seg_length}")
+            data = data[rand_idx: rand_idx+seg_length]
+            
+        return {"mms_rvq_code": data}
         
     def get_mhubert_code(self, audiopath_sid_text):
         return self.torch_load_single(
@@ -416,6 +442,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             },
             return_key="mhubert_code",
         )
+        
 
     def get_mms_code(self, audiopath_sid_text):
         return self.torch_load_single(
@@ -561,6 +588,8 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         seg_length = self.optional['mms_seg_size'] * 2
         assert self.temp_arg != None, "Put the mel_spec_seg at the last in the datalist"
         # print(f"MEL_{audiopath_sid_text[0]}_{data.shape}_{self.temp_arg}_{self.temp_arg + seg_length}")
+        if self.debug:
+            print(f'mel spec: {self.temp_arg} -> {self.temp_arg + seg_length} of {data.shape}')
         data = data[:, self.temp_arg: self.temp_arg + seg_length]
 
         if "mel_spec_160_seg_mean" in self.optional.keys():
@@ -875,6 +904,15 @@ class TextAudioSpeakerCollate():
             feature_dtype=torch.long,
             pad_value = 1025
         )
+        
+    def collect_mms_rvq_code_seq(self, batch, ids_sorted_decreasing):
+        return self.collect_2D_with_length(
+            batch,
+            ids_sorted_decreasing,
+            feature_key="mms_rvq_code",
+            feature_dtype=torch.long,
+            pad_value = 1025
+        )
 
     def collect_linear_spec(self, batch, ids_sorted_decreasing):
         return self.collect_2D_with_length(
@@ -1067,6 +1105,7 @@ class TextAudioSpeakerCollate():
         else:
             randstart = random.randint(0, l - self.optional['mms_seg_size'])
             pad_data = data[:, :, randstart:randstart+self.optional['mms_seg_size']].clone()
+            
         return {'mms_rvq_code': pad_data}
 
     def collect_hubert_code(self, batch, ids_sorted_decreasing, pad_value=1025):
