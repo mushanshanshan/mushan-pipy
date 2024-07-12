@@ -126,6 +126,11 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         else:
             self.text_to_id_map = None
             
+        if 'audio_length_balance_sample' in self.optional.keys():
+            self.audio_length_balance_sample = self.optional['text_to_id_map']
+        else:
+            self.audio_length_balance_sample = -1
+            
         self.dataset_lang_map = {
             'cmhq': 'english',
             'lib': 'english',
@@ -267,11 +272,18 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
                     if not self.need_phoneme:
                         pho = " "
 
-                    audiopaths_sid_text_new.append(
-                        [audiopath, spk, dur, ori_text, pho])
-                    total_dur += dur
-                    audio_lengths.append(dur)
-                    text_lengths.append(len(pho))
+                    if self.audio_length_balance_sample == -1:
+                        sample_times = 1
+                    else:
+                        sample_times = max(1, dur // self.audio_length_balance_sample)
+                        
+                    for _ in range(sample_times):
+                        audiopaths_sid_text_new.append(
+                            [audiopath, spk, dur, ori_text, pho])
+                        total_dur += dur
+                        audio_lengths.append(dur)
+                        text_lengths.append(len(pho))
+
                     self.ref_dict[spk].append(audiopath)
 
             except Exception as e:
