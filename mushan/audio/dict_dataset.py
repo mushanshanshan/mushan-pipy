@@ -163,12 +163,12 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
 
         self.symbols_len = self.frontend.symbols_len
 
-        self.lmdb_txn = None
-        if "lmdb_path" in self.optional.keys():
-            self.lmdb_path = self.optional["lmdb_path"]
-        else:
-            self.lmdb_path = None
-
+        for key in self.data_list:
+            try:
+                func = getattr(self, f"pre_{key}")
+                func()
+            except AttributeError:
+                pass
         
         self.temp_arg = None
         random.seed(1234)
@@ -301,6 +301,11 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         if self.rank == 0:
             logger.info(
                 f"Avaliable data length: {len(self.audiopaths_sid_text)}/{ori_data_length} | {int(total_dur/60/60)} hours")
+            
+            
+            
+    def pre_language_ref(self):
+        self.language_ref_dict = from_pickle("/home/mushan/exp/s2/build_language/lang_ref")
 
     def torch_load_single(self, audiopath_sid_text, path_replaecments, return_key, post_process=[]):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
@@ -320,7 +325,50 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
     def get_dummy(self, audiopath_sid_text):
         return {}
     
-    
+    def get_language_ref(self, audiopath_sid_text):
+        language_idx = self.get_language_idx(audiopath_sid_text)['language_idx']
+        spk = audiopath_sid_text[1]
+        candidates = random.sample(self.language_ref_dict[language_idx], 10)
+        target = candidates[-1]
+        for c in candidates:
+            if c[1] != spk:
+                target = c
+                break
+        pt = target[0]
+        
+        mms = pt.replace("/wave/", "/feature/mms/").replace(".flac", ".l.44.norm")
+        mms = torch.load(mms, map_location='cpu')
+        
+        mel = pt.replace("/wave/", "/feature/mel_spec/").replace(".flac", ".160")
+        mel = torch.load(mel, map_location='cpu')
+        mel = mel[:20, :]
+        
+        if self.debug:
+            ori_mms_length = mms.shape[-1]
+            ori_mel_length = mel.shape[-1]
+        
+        
+        max_len = min(mms.shape[-1], int(mel.shape[-1] / 2))
+        rand_start = random.randint(0, max_len)
+        seg_length = self.optional["language_ref_length"]
+        
+        mms = mms[:, rand_start: rand_start + seg_length]
+        mms = mms.repeat_interleave(2, dim=1)
+        mel = mel[:, rand_start * 2 : (rand_start + seg_length) * 2]
+        
+        if mel.shape[-1] > mms.shape[-1]:
+            mel = mel[:, :mms.shape[-1]]
+        
+        ref = torch.cat([mms, mel], dim = 0)
+        
+        if self.debug:
+            print(f"lang mms: {rand_start / ori_mms_length} -> {(rand_start + seg_length) / ori_mms_length}")
+            print(f"lang mel: {rand_start * 2 / ori_mel_length} -> {(rand_start + seg_length) * 2 / ori_mel_length}")
+        
+        
+        return {"language_ref": ref}
+        
+        
     def get_language_idx(self, audiopath_sid_text):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
         
@@ -419,6 +467,28 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
     def get_mms_rvq_code_pad_seg(self, audiopath_sid_text):
         return self.get_mms_rvq_code(audiopath_sid_text)
     
+    def get_double_mms_rvq_code(self, audiopath_sid_text):
+        data = self.get_mms_rvq_code(audiopath_sid_text)['mms_rvq_code']
+        seg_length = self.optional['mms_seg_size']
+        
+        if (data.shape[-1] > seg_length):
+            rand_idx = random.randint(0, data.shape[-1] - seg_length - 1)
+            self.temp_arg = rand_idx
+            if self.debug:
+                temp_l = data.shape[-1]
+                print(f'mms code: {rand_idx / temp_l} -> {(rand_idx+seg_length) / temp_l} of {temp_l}')
+            # print(f"MMS_{audiopath_sid_text[0]}_{data.shape}_{rand_idx}_{rand_idx+seg_length}")
+            data = data[:, rand_idx: rand_idx+seg_length]
+        else:
+            self.temp_arg = 0
+            if self.debug:
+                temp_l = data.shape[-1]
+                print(f'mms code: 0 -> 1.0 of {temp_l}')
+        
+        data = data.repeat_interleave(2, dim=-1)
+        return {"mms_rvq_code": data} 
+            
+    
     def get_mms_rvq_code_seq(self, audiopath_sid_text):
         data = self.get_mms_rvq_code(audiopath_sid_text)['mms_rvq_code']
         # data = rearrange(data, 'q l ->l q')
@@ -440,8 +510,12 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             seg_length = self.optional['mms_seg_size']
             rand_idx = random.randint(0, data.shape[-1] - seg_length - 1)
             self.temp_arg = rand_idx
+            temp_l = data.shape[-1]
+            if self.debug:
+                print(f'mms code: {rand_idx / temp_l} -> {(rand_idx+seg_length) / temp_l} of {temp_l}')
             # print(f"MMS_{audiopath_sid_text[0]}_{data.shape}_{rand_idx}_{rand_idx+seg_length}")
-            data = data[rand_idx: rand_idx+seg_length]
+            data = data[:, rand_idx: rand_idx+seg_length]
+            data = data.repeat_interleave(2, dim=-1)
             
         return {"mms_rvq_code": data}
         
@@ -587,6 +661,33 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             },
             return_key="mel_spec",
         )
+        
+    def get_mms_corr_mel_160(self, audiopath_sid_text):
+        data = self.torch_load_single(
+            audiopath_sid_text,
+            path_replaecments={
+                "/wave/": "/feature/mel_spec/",
+                ".flac": ".160"
+            },
+            return_key="mel_spec",
+        )['mel_spec']
+
+        seg_length = self.optional['mms_seg_size'] * 2
+        self.temp_arg *= 2
+        assert self.temp_arg != None, "Put the mel_spec_seg at the last in the datalist"
+        
+        if self.debug:
+            print(seg_length)
+            temp_l = data.shape[-1]
+            print(f'mel spec: {self.temp_arg / temp_l} -> {min(1, (self.temp_arg + seg_length) / temp_l)} of {temp_l}')
+        
+        data = data[:, self.temp_arg: self.temp_arg + seg_length]
+
+        if "mel_spec_160_seg_mean" in self.optional.keys():
+            data = (data - self.optional["mel_spec_160_seg_mean"]
+                    ) / self.optional["mel_spec_160_seg_std"]
+
+        return {"mel_spec": data}
 
     def get_mel_spec_160_seg(self, audiopath_sid_text):
         data = self.torch_load_single(
@@ -599,10 +700,13 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         )['mel_spec']
 
         seg_length = self.optional['mms_seg_size'] * 2
+        self.temp_arg *= 2
         assert self.temp_arg != None, "Put the mel_spec_seg at the last in the datalist"
         # print(f"MEL_{audiopath_sid_text[0]}_{data.shape}_{self.temp_arg}_{self.temp_arg + seg_length}")
         if self.debug:
-            print(f'mel spec: {self.temp_arg} -> {self.temp_arg + seg_length} of {data.shape}')
+            temp_l = data.shape[-1]
+            print(f'mel spec: {self.temp_arg / temp_l} -> {(self.temp_arg + seg_length) / temp_l} of {temp_l}')
+        
         data = data[:, self.temp_arg: self.temp_arg + seg_length]
 
         if "mel_spec_160_seg_mean" in self.optional.keys():
@@ -746,6 +850,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         rand_idx = random.randint(
             0, audio.shape[-1] - self.optional['wave_seg_size'])
         audio = audio[:, rand_idx: rand_idx + self.optional['wave_seg_size']]
+        
         mel = hifi_mel_spectrogram(audio,
                                    self.optional['wave_seg_mel_n_fft'],
                                    self.optional['wave_seg_mel_n_mel'],
@@ -755,6 +860,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
                                    self.optional['wave_seg_mel_fmin'],
                                    self.optional['wave_seg_mel_fmax'],
                                    center=False)
+        
         loss_mel = hifi_mel_spectrogram(audio,
                                         self.optional['wave_seg_mel_n_fft'],
                                         self.optional['wave_seg_mel_n_mel'],
@@ -764,6 +870,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
                                         self.optional['wave_seg_mel_fmin'],
                                         self.optional['wave_seg_mel_fmax_loss'],
                                         center=False)
+        
         audio = audio.squeeze(0)
         mel = mel.squeeze(0)
         loss_mel = mel.squeeze(0)
@@ -821,13 +928,13 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         res = {}
         self.temp_arg = None
         for key in self.data_list:
-            # try:
-            #     func = getattr(self, f"get_{key}")
-            #     res.update(func(audiopath_sid_text))
-            # except AttributeError:
-            #     raise NotImplementedError("Class `{}` does not implement `get_{}`".format(self.__class__.__name__, key))
-            func = getattr(self, f"get_{key}")
-            res.update(func(audiopath_sid_text))
+            try:
+                func = getattr(self, f"get_{key}")
+                res.update(func(audiopath_sid_text))
+            except AttributeError:
+                raise NotImplementedError("Class `{}` does not implement `get_{}`".format(self.__class__.__name__, key))
+            # func = getattr(self, f"get_{key}")
+            # res.update(func(audiopath_sid_text))
 
         return res
 
@@ -857,9 +964,10 @@ class TextAudioSpeakerCollate():
 
         return {"language_idx": lang_idx}
 
-    def collect_2D_with_length(self, batch, ids_sorted_decreasing, feature_key, length_dim_idx=1, pad_value=0, feature_dtype=torch.float):
+    def collect_2D_with_length(self, batch, ids_sorted_decreasing, feature_key, length_dim_idx=1, max_length = 0, pad_value=0, feature_dtype=torch.float):
         max_feature_len = max(
             [x[feature_key].size(length_dim_idx) for x in batch])
+        max_feature_len = max(max_feature_len, max_length)
         feature_lengths = torch.LongTensor(len(batch))
 
         if feature_dtype == torch.float or feature_dtype == torch.float32:
@@ -926,6 +1034,16 @@ class TextAudioSpeakerCollate():
             feature_dtype=torch.long,
             pad_value = 1025
         )
+        
+    def collect_double_mms_rvq_code(self, batch, ids_sorted_decreasing):
+        return self.collect_2D_with_length(
+            batch,
+            ids_sorted_decreasing,
+            feature_key="mms_rvq_code",
+            feature_dtype=torch.long,
+            pad_value = 1025,
+            max_length = self.optional['max_length']
+        )
 
     def collect_linear_spec(self, batch, ids_sorted_decreasing):
         return self.collect_2D_with_length(
@@ -956,6 +1074,14 @@ class TextAudioSpeakerCollate():
             batch,
             ids_sorted_decreasing,
             feature_key="xlsr2b_feature_48",
+            feature_dtype=torch.float
+        )
+        
+    def collect_language_ref(self, batch, ids_sorted_decreasing):
+        return self.collect_2D_with_length(
+            batch,
+            ids_sorted_decreasing,
+            feature_key="language_ref",
             feature_dtype=torch.float
         )
 
@@ -1029,6 +1155,15 @@ class TextAudioSpeakerCollate():
             ids_sorted_decreasing,
             feature_key="mel_spec",
             feature_dtype=torch.float
+        )
+        
+    def collect_mms_corr_mel_160(self, batch, ids_sorted_decreasing):
+        return self.collect_2D_with_length(
+            batch,
+            ids_sorted_decreasing,
+            feature_key="mel_spec",
+            feature_dtype=torch.float,
+            max_length=self.optional['max_length']
         )
 
     def collect_audiopath(self, batch, ids_sorted_decreasing):
