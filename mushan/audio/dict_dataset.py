@@ -10,6 +10,7 @@ import torchaudio
 import copy
 import pickle
 import lmdb
+import itertools
 from collections import defaultdict
 from loguru import logger
 from mushan.io import from_pickle, to_pickle
@@ -126,12 +127,6 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         else:
             self.text_to_id_map = None
             
-        if 'audio_length_balance_sample' in self.optional.keys():
-            self.audio_length_balance_sample = self.optional['audio_length_balance_sample']
-            logger.info(f"Using audio length balancer, ratio: {str(self.audio_length_balance_sample)}")
-        else:
-            self.audio_length_balance_sample = -1
-            
         self.dataset_lang_map = {
             'cmhq': 'english',
             'lib': 'english',
@@ -174,6 +169,8 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         random.seed(1234)
         random.shuffle(self.audiopaths_sid_text)
         self._filter()
+        self._language_balance()
+        self._duration_balance()
         self._repeat()
         
     def _intersperse(self, seq, item):
@@ -193,6 +190,81 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         
         sequence = torch.LongTensor(sequence)
         return sequence
+    
+    def _language_balance(self):
+        if 'max_language_dur' not in self.optional.keys() or 'min_language_dur' not in self.optional.keys():
+            return
+        
+        if 'max_language_ratio' not in self.optional.keys():
+            max_language_ratio = 5
+        else:
+            max_language_ratio = self.optional['max_language_ratio']
+            
+        language_counter = defaultdict(int)
+        language_set = defaultdict(list)
+        max_dur = 0
+        for i in self.audiopaths_sid_text:
+            lang = self.get_language_idx(i)['language_name']
+            language_counter[lang] += i[2]
+            language_set[lang].append(i)
+        
+        if self.rank == 0:
+            logger.info("=" * 40)
+            logger.info("Using language balancer, before balance:")
+            for k, v in language_counter.items():
+                max_dur = max(v, max_dur)
+                logger.info(f"{k}: {(v / 60 / 60):.2f}  hours")
+                
+        new_language_counter = defaultdict(int)
+        new_audiopaths_sid_text = []
+        
+        for lang, fls in language_set.items():
+            length = len(fls)
+            i = 0
+            while True:
+                cur = i % length
+                i += 1
+                
+                new_audiopaths_sid_text.append(fls[cur])
+                new_language_counter[lang] += fls[cur][2]
+                
+                if new_language_counter[lang] > self.optional['max_language_dur'] * 60 * 60:
+                    break
+                if i > length and new_language_counter[lang] > self.optional['min_language_dur'] * 60 * 60:
+                    break
+                if i / length > max_language_ratio:
+                    break
+                
+        self.audiopaths_sid_text = new_audiopaths_sid_text
+        
+        if self.rank == 0:
+            logger.info("After balance:")
+            for k, v in new_language_counter.items():
+                max_dur = max(v, max_dur)
+                logger.info(f"{k}: {(v / 60 / 60):.2f}  hours| ratio: {(v / language_counter[k]):.2f}")
+        
+                
+    def _duration_balance(self):
+        if 'audio_dur_balance_step_size' not in self.optional.keys():
+            return
+        
+        if self.rank == 0:
+            logger.info("=" * 40)
+            logger.info(f"Using audio length balancer, ratio: {str(self.optional['audio_dur_balance_step_size'])}")
+            logger.info(f"Before furation balance resample: {len(self.audiopaths_sid_text)}")
+            
+        new_audiopaths_sid_text = []
+        
+        for i in self.audiopaths_sid_text:
+            dur = i[2]
+            sample_times = max(1, int(dur // self.optional['audio_dur_balance_step_size']))
+            for _ in range(sample_times):
+                new_audiopaths_sid_text.append(i)
+        
+        
+        self.audiopaths_sid_text = new_audiopaths_sid_text
+        logger.info(f"After furation balance resample: {len(self.audiopaths_sid_text)}")
+
 
     def _repeat(self):
         """
@@ -273,17 +345,11 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
                     if not self.need_phoneme:
                         pho = " "
 
-                    if self.audio_length_balance_sample == -1:
-                        sample_times = 1
-                    else:
-                        sample_times = max(1, int(dur // self.audio_length_balance_sample))
-                        
-                    for _ in range(sample_times):
-                        audiopaths_sid_text_new.append(
-                            [audiopath, spk, dur, ori_text, pho])
-                        total_dur += dur
-                        audio_lengths.append(dur)
-                        text_lengths.append(len(pho))
+                    audiopaths_sid_text_new.append(
+                        [audiopath, spk, dur, ori_text, pho])
+                    total_dur += dur
+                    audio_lengths.append(dur)
+                    text_lengths.append(len(pho))
 
                     self.ref_dict[spk].append(audiopath)
 
@@ -337,10 +403,10 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         pt = target[0]
         
         mms = pt.replace("/wave/", "/feature/mms/").replace(".flac", ".l.44.norm")
-        mms = torch.load(mms, map_location='cpu')
+        mms = torch.load(mms, mmap = True, map_location=torch.device('cpu'))
         
         mel = pt.replace("/wave/", "/feature/mel_spec/").replace(".flac", ".160")
-        mel = torch.load(mel, map_location='cpu')
+        mel = torch.load(mel, mmap = True, map_location=torch.device('cpu'))
         mel = mel[:20, :]
         
         if self.debug:
@@ -352,9 +418,9 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         rand_start = random.randint(0, max_len)
         seg_length = self.optional["language_ref_length"]
         
-        mms = mms[:, rand_start: rand_start + seg_length]
+        mms = mms[:, rand_start: rand_start + seg_length].clone()
         mms = mms.repeat_interleave(2, dim=1)
-        mel = mel[:, rand_start * 2 : (rand_start + seg_length) * 2]
+        mel = mel[:, rand_start * 2 : (rand_start + seg_length) * 2].clone()
         
         if mel.shape[-1] > mms.shape[-1]:
             mel = mel[:, :mms.shape[-1]]
@@ -373,16 +439,20 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
         
         if '/libri_16/' in audiopath:
-            lang_id =  self.language_map['english']
+            language_name = 'english'
+            lang_id =  self.language_map[language_name]
+        if '/ftspeech/' in audiopath:
+            language_name = 'danish'
+            lang_id =  self.language_map[language_name]
         elif '/mls_16/' in audiopath:
-            lang_id = audiopath.split('/')[-5]
-            lang_id = self.language_map[lang_id]
+            language_name = audiopath.split('/')[-5]
+            lang_id =  self.language_map[language_name]
         elif '/fleurs_16/' in audiopath:
-            lang_id = audiopath.split('/')[-3]
-            lang_id = self.language_map[lang_id]
+            language_name = audiopath.split('/')[-3]
+            lang_id =  self.language_map[language_name]
         else:
             lang_id = 0
-        return {'language_idx': lang_id}
+        return {'language_idx': lang_id, 'language_name': language_name}
 
     def get_audiopath(self, audiopath_sid_text):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
@@ -677,7 +747,6 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         assert self.temp_arg != None, "Put the mel_spec_seg at the last in the datalist"
         
         if self.debug:
-            print(seg_length)
             temp_l = data.shape[-1]
             print(f'mel spec: {self.temp_arg / temp_l} -> {min(1, (self.temp_arg + seg_length) / temp_l)} of {temp_l}')
         
@@ -803,7 +872,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             "/wave/", "/feature/mhubert/").replace(".flac", ".code")
         assert os.path.exists(spec_filename), spec_filename
 
-        spec = torch.load(spec_filename, map_location='cpu')
+        spec = torch.load(spec_filename, map_location=torch.device('cpu'))
         if spec.shape[-1] > 150:
             start = random.randint(0, spec.shape[-1] - 150)
             spec = spec[start: start+150]
@@ -921,7 +990,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         spec_filename = ref.replace(".flac", ".emb")
         assert os.path.exists(spec_filename), spec_filename
 
-        spec = torch.load(spec_filename, map_location='cpu')
+        spec = torch.load(spec_filename, map_location=torch.device('cpu'))
         return {"your_ref": spec}
 
     def get_audio_text_speaker_pair(self, audiopath_sid_text):
@@ -1042,7 +1111,7 @@ class TextAudioSpeakerCollate():
             feature_key="mms_rvq_code",
             feature_dtype=torch.long,
             pad_value = 1025,
-            max_length = self.optional['max_length']
+            max_length = self.optional['mms_seg_size'] * 2
         )
 
     def collect_linear_spec(self, batch, ids_sorted_decreasing):
@@ -1163,7 +1232,7 @@ class TextAudioSpeakerCollate():
             ids_sorted_decreasing,
             feature_key="mel_spec",
             feature_dtype=torch.float,
-            max_length=self.optional['max_length']
+            max_length=self.optional['mms_seg_size'] * 2
         )
 
     def collect_audiopath(self, batch, ids_sorted_decreasing):
@@ -1393,7 +1462,10 @@ class TextAudioSpeakerCollate():
         max_pho_len = max([len(x['phoneme']) for x in batch])
         pho_lengths = torch.LongTensor(len(batch))
         pho_padded = torch.LongTensor(len(batch), max_pho_len)
-        pho_padded.zero_()
+        if 'text_pad_token' in self.optional.keys():
+            pho_padded.fill_(self.optional['text_pad_token'])
+        else:
+            pho_padded.zero_()
 
         for i in range(len(ids_sorted_decreasing)):
             row = batch[ids_sorted_decreasing[i]]

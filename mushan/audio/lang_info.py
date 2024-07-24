@@ -6,6 +6,7 @@ mls_language_map = {
     'polish': 15,
     'portuguese': 16,
     'spanish': 17,
+    'danish': 18,
 }
 fleurs_language_map = {'ceb_ph': 20,
     'gl_es': 21,

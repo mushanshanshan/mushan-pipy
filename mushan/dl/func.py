@@ -3,6 +3,11 @@ import os
 from varname import argname
 import torch.nn as nn
 
+def check_no_grad_parameters(model):
+    for name, param in model.named_parameters():
+        if param.requires_grad_() and param.grad is None:
+            print(name)
+
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e6
 
