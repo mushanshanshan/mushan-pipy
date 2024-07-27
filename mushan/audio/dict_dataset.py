@@ -371,7 +371,10 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             
             
     def pre_language_ref(self):
-        self.language_ref_dict = from_pickle("/home/mushan/exp/s2/build_language/lang_ref")
+        if 'lang_ref_dict' in self.optional.keys():
+             self.language_ref_dict = from_pickle(self.optional['lang_ref_dict'])
+        else:
+            self.language_ref_dict = from_pickle("/home/mushan/exp/s2/build_language/lang_ref")
 
     def torch_load_single(self, audiopath_sid_text, path_replaecments, return_key, post_process=[]):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
@@ -441,8 +444,11 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         if '/libri_16/' in audiopath:
             language_name = 'english'
             lang_id =  self.language_map[language_name]
-        if '/ftspeech/' in audiopath:
+        elif '/ftspeech/' in audiopath:
             language_name = 'danish'
+            lang_id =  self.language_map[language_name]
+        elif '/vp_ita' in audiopath:
+            language_name = 'italian'
             lang_id =  self.language_map[language_name]
         elif '/mls_16/' in audiopath:
             language_name = audiopath.split('/')[-5]
@@ -451,7 +457,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             language_name = audiopath.split('/')[-3]
             lang_id =  self.language_map[language_name]
         else:
-            lang_id = 0
+            raise Exception(f"Unknow language dataset: {audiopath}")
         return {'language_idx': lang_id, 'language_name': language_name}
 
     def get_audiopath(self, audiopath_sid_text):

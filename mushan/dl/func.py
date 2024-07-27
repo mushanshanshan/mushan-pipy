@@ -5,7 +5,7 @@ import torch.nn as nn
 
 def check_no_grad_parameters(model):
     for name, param in model.named_parameters():
-        if param.requires_grad_() and param.grad is None:
+        if param.requires_grad and param.grad is None:
             print(name)
 
 def count_parameters(model):
