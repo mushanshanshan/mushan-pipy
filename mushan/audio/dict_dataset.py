@@ -18,7 +18,7 @@ from mushan.text.eng.front_end import Frontend as ENFrontend
 from mushan.text.chs.front_end import Frontend as CNFrontend
 from mushan.models.bigv.utils import bigv_mel
 from mushan.audio.hifi_mel import mel_spectrogram as hifi_mel_spectrogram
-from mushan.audio.lang_info import mls_language_map, fleurs_language_map
+from mushan.audio.lang_info import *
 from librosa.util import normalize
 from einops import rearrange, repeat, reduce
 
@@ -133,26 +133,12 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             self.text_to_id_map = self.optional['text_to_id_map']
         else:
             self.text_to_id_map = None
-            
-        self.dataset_lang_map = {
-            'cmhq': 'english',
-            'lib': 'english',
-            'mls': 'english',
-            'vctk': 'english',
-            'dutch': 'dutch',
-            'french': 'french',
-            'german': 'german',
-            'italian': 'italian',
-            'polish': 'polish',
-            'portuguese': 'portuguese',
-            'spanish': 'spanish',
-        }
 
-        self.language_map = {
-            'english': 10,
-        }
+        self.language_map = {}
         self.language_map.update(mls_language_map)
         self.language_map.update(fleurs_language_map)
+        self.language_map.update(mmstts_language_map)
+        self.language_code = language_code
         
         self.language_class = max(list(self.language_map.values()))
 
@@ -162,6 +148,8 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         else:
             self.language = 'en'
             self.frontend = ENFrontend()
+            
+
 
         self.symbols_len = self.frontend.symbols_len
 
@@ -175,11 +163,55 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         self.temp_arg = None
         random.seed(1234)
         random.shuffle(self.audiopaths_sid_text)
+        if "dnsmos_filter" in self.optional.keys():
+            self._dnsmos_filter()
         self._filter()
         self._language_balance()
         self._duration_balance()
         self._repeat()
+    
+    def _dnsmos_filter(self):
         
+        mos = from_pickle(f"/home/{self.username}/data/filelists/blacklists/dnsmos.pk")
+        
+        if self.optional["dnsmos_filter"] == 0.05:
+            sig_th = 2.90
+            bak_th = 2.53
+            over_th = 2.17
+        elif self.optional["dnsmos_filter"] == 0.1:
+            sig_th = 3.08
+            bak_th = 2.86
+            over_th = 2.38
+        elif self.optional["dnsmos_filter"] == 0.2:
+            sig_th = 3.24
+            bak_th = 3.24
+            over_th = 2.62
+        else:
+            raise Exception(f"Get unexcepted dnsmos_filter threshold: {self.optional['dnsmos_filter']}, need to be: 0.05 / 0.1 / 0.2")
+        
+        ori_dur = 0
+        val_dur = 0
+        new_audiopaths_sid_text = []
+        for i in self.audiopaths_sid_text:
+            if len(i) == 5:
+                audiopath, _, dur, _, _ = i
+            elif len(i) == 4:
+                audiopath, _, dur, _ = i
+                
+            dur = float(dur)
+            ori_dur += dur
+            try:
+                sig, bak, o = mos[audiopath.split("/")[-1].split(".")[0]]
+            except KeyError:
+                raise Exception(f"Key error: {audiopath}")
+
+            if sig > sig_th and bak > bak_th and o > over_th:
+                val_dur += dur
+                new_audiopaths_sid_text.append(i)
+            
+        logger.info("=" * 40)
+        logger.info(f"Using DNSMOS filter, before filter: {ori_dur / 60 / 60} hours; after filter: {val_dur / 60 / 60} hours")
+    
     def _intersperse(self, seq, item):
         result = [item] * (len(seq) * 2 + 1)
         result[1::2] = seq
@@ -454,20 +486,23 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
         
         if '/libri_16/' in audiopath:
-            language_name = 'english'
-            lang_id =  self.language_map[language_name]
+            language_name = 'English'
+            lang_id =  self.language_code[language_name]
         elif '/ftspeech/' in audiopath:
-            language_name = 'danish'
-            lang_id =  self.language_map[language_name]
+            language_name = 'Danish'
+            lang_id =  self.language_code[language_name]
         elif '/vp_ita' in audiopath:
-            language_name = 'italian'
-            lang_id =  self.language_map[language_name]
+            language_name = 'Italian'
+            lang_id =  self.language_code[language_name]
         elif '/mls_16/' in audiopath:
-            language_name = audiopath.split('/')[-5]
-            lang_id =  self.language_map[language_name]
+            language_name = self.language_map[audiopath.split('/')[-5]]
+            lang_id =  self.language_code[language_name]
         elif '/fleurs_16/' in audiopath:
-            language_name = audiopath.split('/')[-3]
-            lang_id =  self.language_map[language_name]
+            language_name = self.language_map[audiopath.split('/')[-3]]
+            lang_id =  self.language_code[language_name]
+        elif '/mmstts_16/' in audiopath:
+            language_name = self.language_map[audiopath.split('/')[-2]]
+            lang_id =  self.language_code[language_name]
         else:
             raise Exception(f"Unknow language dataset: {audiopath}")
         return {'language_idx': lang_id, 'language_name': language_name}
