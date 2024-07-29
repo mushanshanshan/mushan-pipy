@@ -22,8 +22,11 @@ from mushan.audio.lang_info import mls_language_map, fleurs_language_map
 from librosa.util import normalize
 from einops import rearrange, repeat, reduce
 
-def build_black_list(filename, key):
-    key_black_list_path = f"/home/mushan/data/filelists/blacklists/{key}.pk"
+def build_black_list(filename, key, username = "mushan"):
+    if target_path == None:
+        key_black_list_path = f"/home/{username}/data/filelists/blacklists/{key}.pk"
+    else:
+        key_black_list_path = f"{target_path}/{key}.pk"
     if os.path.exists(key_black_list_path):
         blist = from_pickle(key_black_list_path)
     else:
@@ -60,12 +63,13 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         3) computes spectrograms from audio files.
     """
 
-    def __init__(self, config, optional={}, tag='train', debug=False):
+    def __init__(self, config, optional={}, tag='train', debug=False, username="mushan"):
         self.audiopaths_sid_text = []
         self.rank = config.dist.rank
         self.config = config
         self.debug = debug
         self.optional = optional
+        self.username = username
 
         if tag == 'train':
             for i in config.train.train_filelists:
@@ -303,7 +307,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             filter_func = getattr(self, f"filter_{key}", None)
             if callable(filter_func):
                 filter_funcs.append(filter_func)
-            key_black_list_path = f"/home/mushan/data/filelists/blacklists/{key}.pk"
+            key_black_list_path = f"/home/{self.username}/data/filelists/blacklists/{key}.pk"
             if os.path.exists(key_black_list_path):
                 cur_blacklist = from_pickle(key_black_list_path)
                 blacklist = blacklist | set(cur_blacklist)
@@ -374,7 +378,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         if 'lang_ref_dict' in self.optional.keys():
              self.language_ref_dict = from_pickle(self.optional['lang_ref_dict'])
         else:
-            self.language_ref_dict = from_pickle("/home/mushan/exp/s2/build_language/lang_ref")
+            self.language_ref_dict = from_pickle(f"/home/{self.username}/exp/s2/build_language/lang_ref")
 
     def torch_load_single(self, audiopath_sid_text, path_replaecments, return_key, post_process=[]):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
@@ -463,7 +467,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
     def get_audiopath(self, audiopath_sid_text):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
 
-        return {"audio_path": audiopath.replace('/home/mushan/data/wave/', '')}
+        return {"audio_path": audiopath.replace(f'/home/{self.username}/data/wave/', '')}
 
     def get_hubert(self, audiopath_sid_text):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
