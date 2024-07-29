@@ -22,8 +22,11 @@ from mushan.audio.lang_info import mls_language_map, fleurs_language_map
 from librosa.util import normalize
 from einops import rearrange, repeat, reduce
 
-def build_black_list(filename, key, username = "mushan"):
-    key_black_list_path = f"/home/{username}/data/filelists/blacklists/{key}.pk"
+def build_black_list(filename, key, target_dir = None):
+    if target_dir != None:
+        key_black_list_path = target_dir
+    else:
+        key_black_list_path = f"/home/{os.getlogin()}/data/filelists/blacklists/{key}.pk"
     if os.path.exists(key_black_list_path):
         blist = from_pickle(key_black_list_path)
     else:
@@ -60,13 +63,16 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         3) computes spectrograms from audio files.
     """
 
-    def __init__(self, config, optional={}, tag='train', debug=False, username="mushan"):
+    def __init__(self, config, optional={}, tag='train', debug=False, username=None):
         self.audiopaths_sid_text = []
         self.rank = config.dist.rank
         self.config = config
         self.debug = debug
         self.optional = optional
-        self.username = username
+        if username == None:
+            self.username = os.getlogin()
+        else:
+            self.username = username
 
         if tag == 'train':
             for i in config.train.train_filelists:
@@ -416,11 +422,15 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         if self.debug:
             ori_mms_length = mms.shape[-1]
             ori_mel_length = mel.shape[-1]
+            
         
+        if self.debug:
+            print(mms.shape[-1], int(mel.shape[-1] / 2))
         
-        max_len = min(mms.shape[-1], int(mel.shape[-1] / 2))
-        rand_start = random.randint(0, max_len)
         seg_length = self.optional["language_ref_length"]
+        max_len = min(mms.shape[-1], int(mel.shape[-1] / 2)) - seg_length
+        rand_start = random.randint(0, max_len)
+        
         
         mms = mms[:, rand_start: rand_start + seg_length].clone()
         mms = mms.repeat_interleave(2, dim=1)
@@ -434,6 +444,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         if self.debug:
             print(f"lang mms: {rand_start / ori_mms_length} -> {(rand_start + seg_length) / ori_mms_length}")
             print(f"lang mel: {rand_start * 2 / ori_mel_length} -> {(rand_start + seg_length) * 2 / ori_mel_length}")
+            print(f"language_ref length: {seg_length}")
         
         
         return {"language_ref": ref}
