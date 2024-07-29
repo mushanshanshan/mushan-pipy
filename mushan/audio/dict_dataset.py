@@ -192,6 +192,9 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         ori_dur = 0
         val_dur = 0
         new_audiopaths_sid_text = []
+        miss = 0
+        
+        
         for i in self.audiopaths_sid_text:
             if len(i) == 5:
                 audiopath, _, dur, _, _ = i
@@ -203,14 +206,18 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             try:
                 sig, bak, o = mos[audiopath.split("/")[-1].split(".")[0]]
             except KeyError:
-                raise Exception(f"Key error: {audiopath}")
+                if self.debug:
+                    raise Exception(f"Key error: {audiopath}")
+                miss += 1
+                continue
 
             if sig > sig_th and bak > bak_th and o > over_th:
                 val_dur += dur
                 new_audiopaths_sid_text.append(i)
             
         logger.info("=" * 40)
-        logger.info(f"Using DNSMOS filter, before filter: {ori_dur / 60 / 60} hours; after filter: {val_dur / 60 / 60} hours")
+        logger.info(f"Using DNSMOS filter: {miss} files missing dnsmos scores")
+        logger.info(f"before filter: {ori_dur / 60 / 60} hours; after filter: {val_dur / 60 / 60} hours")
     
     def _intersperse(self, seq, item):
         result = [item] * (len(seq) * 2 + 1)
