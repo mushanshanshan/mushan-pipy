@@ -23,10 +23,7 @@ from librosa.util import normalize
 from einops import rearrange, repeat, reduce
 
 def build_black_list(filename, key, username = "mushan"):
-    if target_path == None:
-        key_black_list_path = f"/home/{username}/data/filelists/blacklists/{key}.pk"
-    else:
-        key_black_list_path = f"{target_path}/{key}.pk"
+    key_black_list_path = f"/home/{username}/data/filelists/blacklists/{key}.pk"
     if os.path.exists(key_black_list_path):
         blist = from_pickle(key_black_list_path)
     else:
