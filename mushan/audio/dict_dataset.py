@@ -163,12 +163,49 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         self.temp_arg = None
         random.seed(1234)
         random.shuffle(self.audiopaths_sid_text)
+        self._blacklist_filter()
         if "dnsmos_filter" in self.optional.keys():
             self._dnsmos_filter()
         self._filter()
         self._language_balance()
         self._duration_balance()
         self._repeat()
+        
+    def _blacklist_filter(self):
+        blacklist = set()
+        new_audiopaths_sid_text = []
+        
+        remove_counter = 0
+        
+        for key in self.data_list:
+            filter_func = getattr(self, f"filter_{key}", None)
+            if callable(filter_func):
+                filter_funcs.append(filter_func)
+            key_black_list_path = f"/home/{self.username}/data/filelists/blacklists/{key}.pk"
+            if os.path.exists(key_black_list_path):
+                cur_blacklist = from_pickle(key_black_list_path)
+                blacklist = blacklist | set(cur_blacklist)
+                
+        for i in self.audiopaths_sid_text:
+            if len(i) == 5:
+                audiopath, _, dur, _, _ = i
+            elif len(i) == 4:
+                audiopath, _, dur, _ = i
+                
+            if audiopath.split("/")[-1].split(".")[0] in blacklist:
+                remove_counter += 1
+                continue
+            
+            new_audiopaths_sid_text.append(i)
+        
+        if self.rank == 0:
+            logger.info("=" * 40)
+            logger.info(f"Remove {remove_counter} from {len(self.audiopaths_sid_text)} files.")
+            logger.info(f"Now remain {len(new_audiopaths_sid_text)} files.")
+            logger.info("=" * 40)
+            
+        self.audiopaths_sid_text = new_audiopaths_sid_text
+        
     
     def _dnsmos_filter(self):
         
@@ -214,10 +251,12 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             if sig > sig_th and bak > bak_th and o > over_th:
                 val_dur += dur
                 new_audiopaths_sid_text.append(i)
-            
-        logger.info("=" * 40)
-        logger.info(f"Using DNSMOS filter: {miss} files missing dnsmos scores")
-        logger.info(f"before filter: {ori_dur / 60 / 60} hours; after filter: {val_dur / 60 / 60} hours")
+        
+        if self.rank == 0:
+            logger.info("=" * 40)
+            logger.info(f"Using DNSMOS filter: {miss} files missing dnsmos scores")
+            logger.info(f"before filter: {ori_dur / 60 / 60} hours; after filter: {val_dur / 60 / 60} hours")
+            logger.info("=" * 40)
     
     def _intersperse(self, seq, item):
         result = [item] * (len(seq) * 2 + 1)
@@ -248,18 +287,10 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             
         language_counter = defaultdict(int)
         language_set = defaultdict(list)
-        max_dur = 0
         for i in self.audiopaths_sid_text:
             lang = self.get_language_idx(i)['language_name']
             language_counter[lang] += i[2]
             language_set[lang].append(i)
-        
-        if self.rank == 0:
-            logger.info("=" * 40)
-            logger.info("Using language balancer, before balance:")
-            for k, v in language_counter.items():
-                max_dur = max(v, max_dur)
-                logger.info(f"{k}: {(v / 60 / 60):.2f}  hours")
                 
         new_language_counter = defaultdict(int)
         new_audiopaths_sid_text = []
@@ -284,10 +315,10 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         self.audiopaths_sid_text = new_audiopaths_sid_text
         
         if self.rank == 0:
-            logger.info("After balance:")
+            logger.info("=" * 40)
+            logger.info("Using language balancer, after balance:")
             for k, v in new_language_counter.items():
-                max_dur = max(v, max_dur)
-                logger.info(f"{k}: {(v / 60 / 60):.2f}  hours| ratio: {(v / language_counter[k]):.2f}")
+                logger.info(f"{k}: {(language_counter[k] / 60 / 60):.2f} -> {(v / 60 / 60):.2f} hours| ratio: {(v / language_counter[k]):.2f}")
         
                 
     def _duration_balance(self):
@@ -340,19 +371,10 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         missing_file = []
         filter_funcs = []
         total_dur = 0
-        blacklist = set()
+        
         ori_data_length = len(self.audiopaths_sid_text)
         
         dataset_counter = defaultdict(int)
-
-        for key in self.data_list:
-            filter_func = getattr(self, f"filter_{key}", None)
-            if callable(filter_func):
-                filter_funcs.append(filter_func)
-            key_black_list_path = f"/home/{self.username}/data/filelists/blacklists/{key}.pk"
-            if os.path.exists(key_black_list_path):
-                cur_blacklist = from_pickle(key_black_list_path)
-                blacklist = blacklist | set(cur_blacklist)
 
         if self.rank == 0:
             logger.info(f"Rank {self.rank} start processing filelists...")
@@ -366,9 +388,6 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
                 else:
                     continue
                 dur = float(dur)
-
-                if audiopath.split("/")[-1].split(".")[0] in blacklist:
-                    continue
 
                 val = True
                 val = val and dur > self.min_audio_len and dur < self.max_audio_len
