@@ -162,7 +162,6 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         
         self.temp_arg = None
         random.seed(1234)
-        random.shuffle(self.audiopaths_sid_text)
         self._blacklist_filter()
         if "dnsmos_filter" in self.optional.keys():
             self._dnsmos_filter()
@@ -170,6 +169,8 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         self._language_balance()
         self._duration_balance()
         self._repeat()
+        
+        random.shuffle(self.audiopaths_sid_text)
         
     def _blacklist_filter(self):
         blacklist = set()
@@ -469,6 +470,8 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
                 target = c
                 break
         pt = target[0]
+        if self.debug:
+            print(f"Language Ref : {pt}")
         
         mms = pt.replace("/wave/", "/feature/mms/").replace(".flac", ".l.44.norm")
         mms = torch.load(mms, mmap = True, map_location=torch.device('cpu'))
@@ -893,6 +896,8 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         assert len(self.ref_dict[spk]) > 0, spk
 
         ref = random.choice(self.ref_dict[spk])
+        if self.debug:
+            print(f"Speaker Ref : {ref}")
         spec_filename = ref.replace(
             "/wave/", "/feature/mel_spec/").replace(".flac", f".mel")
         assert os.path.exists(spec_filename), spec_filename
@@ -927,6 +932,8 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         assert len(self.ref_dict[spk]) > 0, spk
 
         ref = random.choice(self.ref_dict[spk])
+        if self.debug:
+            print(f"Spk Ref : {ref}")
         spec_filename = ref.replace(
             "/wave/", "/feature/mel_spec/").replace(".flac", f".160")
         assert os.path.exists(spec_filename), spec_filename
@@ -1087,6 +1094,8 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         return res
 
     def __getitem__(self, index):
+        if self.debug:
+            print(f"GT path: {self.audiopaths_sid_text[index][0]}")
         return self.get_audio_text_speaker_pair(self.audiopaths_sid_text[index])
 
     def __len__(self):
