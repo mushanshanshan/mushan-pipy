@@ -450,7 +450,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             target_file = target_file.replace(k, v)
 
         assert os.path.exists(target_file), target_file
-        data = torch.load(target_file, map_location=torch.device('cpu'))
+        data = torch.load(target_file, mmap = True, map_location=torch.device('cpu'), weights_only=False)
 
         for function in post_process:
             data = function(data)
@@ -474,10 +474,10 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             print(f"Language Ref : {pt}")
         
         mms = pt.replace("/wave/", "/feature/mms/").replace(".flac", ".l.44.norm")
-        mms = torch.load(mms, mmap = True, map_location=torch.device('cpu'))
+        mms = torch.load(mms, mmap = True, map_location=torch.device('cpu'), weights_only=False)
         
         mel = pt.replace("/wave/", "/feature/mel_spec/").replace(".flac", ".160")
-        mel = torch.load(mel, mmap = True, map_location=torch.device('cpu'))
+        mel = torch.load(mel, mmap = True, map_location=torch.device('cpu'), weights_only=False)
         mel = mel[:20, :]
         
         if self.debug:
@@ -547,7 +547,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             "/wave/", "/feature/hubert/").replace(".flac", ".code")
         assert os.path.exists(hu_filename), hu_filename
 
-        hu = torch.load(hu_filename, map_location=torch.device('cpu'))
+        hu = torch.load(hu_filename, map_location=torch.device('cpu'), weights_only=False)
         hu, dur = torch.unique_consecutive(hu, return_counts=True)
 
         return {"hubert_code": hu, "hubert_dur": dur}
@@ -558,7 +558,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             "/wave/", "/feature/xlsr2b/").replace(".flac", post_fix)
         seg_length = self.optional['xlsr_seg_size']
 
-        data = torch.load(mms_file, mmap=True)
+        data = torch.load(mms_file, mmap=True, map_location=torch.device('cpu'), weights_only=False)
         # data = torch.load(mms_file, mmap=False)
         rand_idx = random.randint(0, data.shape[-1] - seg_length)
         data = data[:, rand_idx: rand_idx+seg_length]
@@ -570,7 +570,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             "/wave/", "/feature/mms/").replace(".flac", post_fix)
         seg_length = self.optional['mms_seg_size']
         
-        data = torch.load(mms_file, mmap=True)
+        data = torch.load(mms_file, mmap=True, map_location=torch.device('cpu'), weights_only=False)
         rand_idx = random.randint(0, data.shape[-1] - seg_length)
         data = data[:, rand_idx: rand_idx+seg_length]
         if 'mms_mean' in self.optional.keys():
@@ -598,7 +598,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
         mms_file = audiopath.replace(
             "/wave/", "/feature/mms/").replace(".flac", ".44")
-        data = torch.load(mms_file, mmap=True).repeat_interleave(2, dim=1)
+        data = torch.load(mms_file, mmap=True, weights_only=False).repeat_interleave(2, dim=1)
         seg_length = self.optional['mms_seg_size'] * 2
         rand_idx = random.randint(0, data.shape[-1] - seg_length - 1)
         self.temp_arg = rand_idx
@@ -611,7 +611,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
         mms_file = audiopath.replace(
             "/wave/", "/feature/mms/").replace(".flac", self.optional['mms_rvq_code_postfix'])
-        data = torch.load(mms_file, mmap=True, map_location='cpu')
+        data = torch.load(mms_file, mmap=True, map_location='cpu', weights_only=False)
         data = rearrange(data, 'g l q -> (q g) l')
         
         return {"mms_rvq_code": data}
@@ -902,7 +902,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             "/wave/", "/feature/mel_spec/").replace(".flac", f".mel")
         assert os.path.exists(spec_filename), spec_filename
 
-        spec = torch.load(spec_filename, map_location='cpu')
+        spec = torch.load(spec_filename, map_location='cpu', weights_only=False)
         return {"mel_ref": spec}
     
     def get_club(self, audiopath_sid_text, l = 480, pad_value = 0):
@@ -938,7 +938,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             "/wave/", "/feature/mel_spec/").replace(".flac", f".160")
         assert os.path.exists(spec_filename), spec_filename
 
-        spec = torch.load(spec_filename, map_location='cpu')
+        spec = torch.load(spec_filename, map_location='cpu', mmap=True, weights_only=False)
         if "mel_spec_160_seg_len" in self.optional.keys() and spec.shape[-1] > self.optional["mel_spec_160_seg_len"]:
             ref_rand_start = random.randint(0, spec.shape[-1] - self.optional["mel_spec_160_seg_len"] - 1) 
             ref_end = ref_rand_start + self.optional["mel_spec_160_seg_len"]
