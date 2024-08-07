@@ -13,6 +13,7 @@ mushan.egg-info/top_level.txt
 mushan.egg-info/zip-safe
 mushan/audio/__init__.py
 mushan/audio/audio.py
+mushan/audio/codec_mel.py
 mushan/audio/data.py
 mushan/audio/dataset.py
 mushan/audio/dict_dataset.py
