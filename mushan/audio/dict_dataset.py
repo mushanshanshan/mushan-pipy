@@ -439,6 +439,9 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
              self.language_ref_dict = from_pickle(self.optional['lang_ref_dict'])
         else:
             self.language_ref_dict = from_pickle(f"/home/{self.username}/exp/s2/build_language/lang_ref")
+            
+    def pre_nar_language_ref(self):
+        self.pre_language_ref()
 
     def torch_load_single(self, audiopath_sid_text, path_replaecments, return_key, post_process=[]):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
@@ -457,6 +460,68 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
     
     def get_dummy(self, audiopath_sid_text):
         return {}
+    
+    def get_nar_language_ref(self, audiopath_sid_text):
+        lang_ref_length = self.optional['language_ref_length']
+        language_idx = self.get_language_idx(audiopath_sid_text)['language_idx']
+        spk = audiopath_sid_text[1]
+        candidates = random.sample(self.language_ref_dict[language_idx], 10)
+        target = candidates[-1]
+        for c in candidates:
+            if c[1] != spk:
+                target = c
+                break
+        pt = target[0]
+        if self.debug:
+            print(f"Language Ref : {pt}")
+        
+        mms = pt.replace("/wave/", "/feature/mms/").replace(".flac", self.optional['mms_rvq_code_postfix'])
+        mms = torch.load(mms, mmap = True, map_location=torch.device('cpu'), weights_only=False)
+        mms = rearrange(mms, 'g l q -> (q g) l')
+        
+        
+        melvq = pt.replace("/wave/", "/feature/melvq/").replace(".flac", ".g4q8")
+        melvq = torch.load(melvq, mmap = True, map_location=torch.device('cpu'), weights_only=False)
+        
+        
+        
+        
+        if mms.shape[-1] > lang_ref_length and melvq.shape[-1] > lang_ref_length * 2:
+            randidx = random.randint(0, mms.shape[-1] - lang_ref_length)
+            if self.debug:
+                print(f"lang mms: {randidx / mms.shape[-1]} -> {(randidx + lang_ref_length) / mms.shape[-1]}")
+                print(f"lang mel: {randidx * 2 / melvq.shape[-1]} -> {(randidx + lang_ref_length) * 2 / melvq.shape[-1]}")
+                print(f"language_ref length: {lang_ref_length}")
+                
+            mms = mms[:, randidx: randidx + lang_ref_length]
+            melvq = melvq[:, :, randidx * 2: (randidx + lang_ref_length) * 2]
+
+        else:
+            mq, l = mms.shape
+            g, q, _ = melvq.shape
+            l = min(l, lang_ref_length)
+            
+            if self.debug:
+                print(f"lang mms: 0 -> {l / mms.shape[-1]}")
+                print(f"lang mel: 0 -> {l * 2 / melvq.shape[-1]}")
+                print(f"language_ref length: {lang_ref_length}")
+            
+            mms_paded = torch.LongTensor(mq, lang_ref_length)
+            mms_paded.fill_(self.optional['mms_pad_idx'])
+            mms_paded[:, :l] = mms[:, :l]
+            
+            melvq_paded = torch.LongTensor(g, q, lang_ref_length * 2)
+            melvq_paded.fill_(self.optional['mel_vq_pad_idx'])
+            melvq_paded[:, :, :l * 2] = melvq[:, :, :l * 2]
+            
+            mms = mms_paded
+            melvq = melvq_paded
+            
+            
+            
+        return {"mms_language_ref": mms,
+                "melvq_language_ref": melvq}
+            
     
     def get_language_ref(self, audiopath_sid_text):
         language_idx = self.get_language_idx(audiopath_sid_text)['language_idx']
@@ -1475,6 +1540,34 @@ class TextAudioSpeakerCollate():
 
         return {"mel_ref": ref_padded}
     
+    def collect_nar_language_ref(self, batch, ids_sorted_decreasing):
+        g, q, l = batch[0]["melvq_language_ref"].shape
+
+        melvq_ref_padded = torch.LongTensor(
+            len(batch), g, q, l)
+        melvq_ref_padded.fill_(self.optional['mel_vq_pad_idx'])
+
+        for i in range(len(ids_sorted_decreasing)):
+            row = batch[ids_sorted_decreasing[i]]
+            ref = row["melvq_language_ref"]
+            melvq_ref_padded[i, :, :] = ref
+            
+            
+        q, l = batch[0]["mms_language_ref"].shape
+
+        mms_ref_padded = torch.LongTensor(
+            len(batch), q, l)
+        mms_ref_padded.fill_(self.optional['mms_pad_idx'])
+
+        for i in range(len(ids_sorted_decreasing)):
+            row = batch[ids_sorted_decreasing[i]]
+            ref = row["mms_language_ref"]
+            mms_ref_padded[i, :] = ref
+
+        return {"melvq_language_ref": melvq_ref_padded,
+                "mms_language_ref": mms_ref_padded}
+    
+    
     def collect_melvq_ref(self, batch, ids_sorted_decreasing):
         max_ref_len = max([x["melvq_ref"].shape[-1] for x in batch]) + 1
         ref_padded = torch.LongTensor(
@@ -1573,22 +1666,22 @@ class TextAudioSpeakerCollate():
                 "mms_rvq_length": mms_lengths,
                 "mel_grvq_length": mel_vq_lengths}
         
-    def collect_mms_with_mel_vq_old(self, batch, ids_sorted_decreasing):
+    # def collect_mms_with_mel_vq_old(self, batch, ids_sorted_decreasing):
         
-        mms_seg = torch.stack([i['mms_rvq_code'] for i in batch]).to(torch.long)
-        mel_vq_seg = torch.stack([i['mel_grvq_code'] for i in batch]).to(torch.long)
-        mms_length = torch.LongTensor([i['mms_rvq_len'] for i in batch])
-        mel_vq_length = torch.LongTensor([i['mel_grvq_len'] for i in batch])
+    #     mms_seg = torch.stack([i['mms_rvq_code'] for i in batch]).to(torch.long)
+    #     mel_vq_seg = torch.stack([i['mel_grvq_code'] for i in batch]).to(torch.long)
+    #     mms_length = torch.LongTensor([i['mms_rvq_len'] for i in batch])
+    #     mel_vq_length = torch.LongTensor([i['mel_grvq_len'] for i in batch])
         
-        max_len = mel_vq_length.max()
-        mms_seg = mms_seg[:, :, :max_len]
-        mel_vq_seg = mel_vq_seg[:, :, :, :max_len]
+    #     max_len = mel_vq_length.max()
+    #     mms_seg = mms_seg[:, :, :max_len]
+    #     mel_vq_seg = mel_vq_seg[:, :, :, :max_len]
         
-        return {"mms_rvq_code": mms_seg,
-        "mms_rvq_len": mms_length,
-        "mel_grvq_code": mel_vq_seg,
-        "mel_grvq_len": mel_vq_length,
-        } 
+    #     return {"mms_rvq_code": mms_seg,
+    #     "mms_rvq_len": mms_length,
+    #     "mel_grvq_code": mel_vq_seg,
+    #     "mel_grvq_len": mel_vq_length,
+    #     } 
         
         
     def collect_mms_rvq_code_pad_seg(self, batch, ids_sorted_decreasing, pad_value=1025):
@@ -1667,10 +1760,10 @@ class TextAudioSpeakerCollate():
             feature_dtype=torch.long
         )
         
-    def collect_club(self, batch, ids_sorted_decreasing):
-        features = torch.stack([batch[ids_sorted_decreasing[i]]['club'] for i in range(len(ids_sorted_decreasing))])
-        features = features.reshape(features.shape[0] * features.shape[1], features.shape[2], features.shape[3])
-        return {'club': features}
+    # def collect_club(self, batch, ids_sorted_decreasing):
+    #     features = torch.stack([batch[ids_sorted_decreasing[i]]['club'] for i in range(len(ids_sorted_decreasing))])
+    #     features = features.reshape(features.shape[0] * features.shape[1], features.shape[2], features.shape[3])
+    #     return {'club': features}
 
     def collect_mhubert_ref(self, batch, ids_sorted_decreasing, pad_value=1025):
         max_feature_len = max([len(x["mhubert_ref"]) for x in batch]) + 1
