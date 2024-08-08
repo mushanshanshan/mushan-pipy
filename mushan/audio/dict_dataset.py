@@ -921,6 +921,14 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         mel_vq_file = audiopath_sid_text[0].replace(
             "/wave/", "/feature/melvq/").replace(".flac", ".g4q8")
         mel_vq_data = torch.load(mel_vq_file, mmap=True, map_location='cpu', weights_only=False)
+        
+        if self.debug:
+            print(f"Shape of mms: {mms_data.shape}| Shape of melvq: {mel_vq_data.shape}")
+
+        l = min(mel_vq_data.shape[-1], mms_data.shape[-1])
+        mms_data = mms_data[:, :l]
+        mel_vq_data = mel_vq_data[:, :, :l]
+        
         return {"mms_rvq_code": mms_data,
                 "mel_grvq_code": mel_vq_data,
                 } 
