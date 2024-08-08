@@ -915,6 +915,9 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             return_key="mel_spec",
         )
         
+    def get_nar_random_stage(self, audiopath_sid_text):
+        return {}
+        
     def get_mms_with_mel_vq(self, audiopath_sid_text):
         mms_data = self.get_mms_rvq_code(audiopath_sid_text)['mms_rvq_code']
         mms_data = mms_data.repeat_interleave(2, dim=-1)
@@ -1534,6 +1537,14 @@ class TextAudioSpeakerCollate():
     def collect_dummy(self, batch, ids_sorted_decreasing):
         return {}
 
+    def collect_nar_random_stage(self, batch, ids_sorted_decreasing):
+        try:
+            stages = from_pickle(self.optional['nar_stage_list'])
+            rand_stage = random.choice(stages)
+        except:
+            rand_stage = 0
+            
+        return {"nar_random_stage": rand_stage}
     
     def collect_mel_ref(self, batch, ids_sorted_decreasing):
         max_ref_len = max([x["mel_ref"].size(1) for x in batch])
@@ -1573,7 +1584,8 @@ class TextAudioSpeakerCollate():
             mms_ref_padded[i, :] = ref
 
         return {"melvq_language_ref": melvq_ref_padded,
-                "mms_language_ref": mms_ref_padded}
+                "mms_language_ref": mms_ref_padded,
+                "mms_language_ref_len": mms_ref_padded.shape[-1]}
     
     
     def collect_melvq_ref(self, batch, ids_sorted_decreasing):
@@ -1587,7 +1599,8 @@ class TextAudioSpeakerCollate():
             ref = row["melvq_ref"]
             ref_padded[i, :, :, :ref.shape[-1]] = ref
 
-        return {"melvq_ref": ref_padded}
+        return {"melvq_ref": ref_padded,
+                "melvq_ref_length": max_ref_len}
 
     def collect_mel_160_ref(self, batch, ids_sorted_decreasing):
         return self.collect_mel_ref(batch, ids_sorted_decreasing)
