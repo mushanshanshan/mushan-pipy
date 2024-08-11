@@ -1591,7 +1591,7 @@ class TextAudioSpeakerCollate():
     def collect_melvq_ref(self, batch, ids_sorted_decreasing):
         max_ref_len = max([x["melvq_ref"].shape[-1] for x in batch]) + 1
         ref_padded = torch.LongTensor(
-            len(batch), 4, 8, max_ref_len)
+            len(batch), 4, self.optional['mel_vq_quan_size'], max_ref_len)
         ref_padded.fill_(self.optional['mel_vq_pad_idx'])
 
         for i in range(len(ids_sorted_decreasing)):
@@ -1664,7 +1664,7 @@ class TextAudioSpeakerCollate():
         
         mel_vq_lengths = torch.LongTensor(len(batch))
         mel_vq_lengths.zero_()
-        mel_vq_padded = torch.LongTensor(len(batch), 4, 8, max_len)
+        mel_vq_padded = torch.LongTensor(len(batch), 4, self.optional['mel_vq_quan_size'], max_len)
         mel_vq_padded.fill_(self.optional['mel_vq_pad_idx'])
 
         for i in range(len(ids_sorted_decreasing)):
