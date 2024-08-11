@@ -480,7 +480,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         mms = rearrange(mms, 'g l q -> (q g) l')
         
         
-        melvq = pt.replace("/wave/", "/feature/melvq/").replace(".flac", ".g4q8")
+        melvq = pt.replace("/wave/", "/feature/melvq/").replace(".flac", self.optional['melvq_code_postfix'])
         melvq = torch.load(melvq, mmap = True, map_location=torch.device('cpu'), weights_only=False)
         
         
@@ -922,7 +922,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         mms_data = self.get_mms_rvq_code(audiopath_sid_text)['mms_rvq_code']
         mms_data = mms_data.repeat_interleave(2, dim=-1)
         mel_vq_file = audiopath_sid_text[0].replace(
-            "/wave/", "/feature/melvq/").replace(".flac", ".g4q8")
+            "/wave/", "/feature/melvq/").replace(".flac", self.optional['melvq_code_postfix'])
         mel_vq_data = torch.load(mel_vq_file, mmap=True, map_location='cpu', weights_only=False)
         
         if self.debug:
@@ -975,7 +975,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         rand_idx *= 2
         
         mel_vq_file = audiopath_sid_text[0].replace(
-            "/wave/", "/feature/melvq/").replace(".flac", ".g4q8")
+            "/wave/", "/feature/melvq/").replace(".flac", self.optional['melvq_code_postfix'])
         mel_vq_data = torch.load(mel_vq_file, mmap=True, map_location='cpu', weights_only=False)
         if rand_idx == 0:
             mel_vq_length = target_mel_vq_length
@@ -1080,7 +1080,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         if self.debug:
             print(f"Speaker Ref : {ref}")
         spec_filename = ref.replace(
-            "/wave/", "/feature/melvq/").replace(".flac", f".g4q8")
+            "/wave/", "/feature/melvq/").replace(".flac", self.optional['melvq_code_postfix'])
         assert os.path.exists(spec_filename), spec_filename
 
         spec = torch.load(spec_filename, map_location='cpu', weights_only=False).to(torch.long)
