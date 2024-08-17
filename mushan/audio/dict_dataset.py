@@ -692,13 +692,26 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
     def get_mms_feature_44b(self, audiopath_sid_text):
         res = self.get_mms_feature_48(audiopath_sid_text, post_fix=".44b")
         return {"mms_feature_44b": res['mms_feature_48']}
+    
 
     def get_mms_44_seg(self, audiopath_sid_text):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
+        
+        if 'mms_44_postfix' not in self.optional.keys():
+            mms_44_postfix = ".44"
+        else:
+            mms_44_postfix = self.optional['mms_44_postfix']
+        
         mms_file = audiopath.replace(
-            "/wave/", "/feature/mms/").replace(".flac", ".44")
-        data = torch.load(mms_file, mmap=True, weights_only=False).repeat_interleave(2, dim=1)
-        seg_length = self.optional['mms_seg_size'] * 2
+            "/wave/", "/feature/mms/").replace(".flac", mms_44_postfix)
+        data = torch.load(mms_file, mmap=True, weights_only=False)
+        
+        if 'mms_repeate' in self.optional.keys():
+            data = data.repeat_interleave(2, dim=1)
+            seg_length = self.optional['mms_seg_size'] * 2
+        else:
+            seg_length = self.optional['mms_seg_size']
+            
         rand_idx = random.randint(0, data.shape[-1] - seg_length - 1)
         self.temp_arg = rand_idx
         # print(f"MEL_{audiopath_sid_text[0]}_{data.shape}_{rand_idx}_{rand_idx+seg_length}")
@@ -793,6 +806,17 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
                 # ".flac": ".align.code"
             },
             return_key="mms_code",
+        )
+        
+    def get_des_code(self, audiopath_sid_text):
+        return self.torch_load_single(
+            audiopath_sid_text,
+            path_replaecments={
+                "/wave/": "/feature/des_code/",
+                ".flac": ".s"
+                # ".flac": ".align.code"
+            },
+            return_key="des_code",
         )
         
     def get_mms_code_pad_seg(self, audiopath_sid_text):
@@ -1381,6 +1405,15 @@ class TextAudioSpeakerCollate():
             pad_value = 1025
         )
         
+    def collect_des_code(self, batch, ids_sorted_decreasing):
+        return self.collect_2D_with_length(
+            batch,
+            ids_sorted_decreasing,
+            feature_key="des_code",
+            feature_dtype=torch.long,
+            pad_value = 1024
+        )
+        
     def collect_mms_rvq_code_seq(self, batch, ids_sorted_decreasing):
         return self.collect_2D_with_length(
             batch,
@@ -1463,6 +1496,7 @@ class TextAudioSpeakerCollate():
             feature_key="mms_feature_44b",
             feature_dtype=torch.float
         )
+        
 
     def collect_mms_44_seg(self, batch, ids_sorted_decreasing):
         return self.collect_2D_with_length(
@@ -1936,7 +1970,7 @@ class TextAudioSpeakerCollate():
         sort_key = None
         res = {}
 
-        for i in ['mel_spec', 'mel_spec_160', 'linear_spec', 'mms_feature_44b', 'mms_feature_44', 'xlsr2b_feature_48']:
+        for i in ['mel_spec', 'mel_spec_160', 'linear_spec', 'mms_feature_44b', 'mms_feature_44', 'mms_44_seg', 'xlsr2b_feature_48']:
             if i in batch[0].keys():
                 sort_key = i
                 _, ids_sorted_decreasing = torch.sort(
