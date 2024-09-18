@@ -25,6 +25,9 @@ def get_model(config, ckp):
     generator = BigVSAN(h)
     generator.load_state_dict(state_dict_g['generator'])
     
+    if generator.post:
+        generator.ren._config(state_dict_g['net_e'])
+    
     generator.eval()
     generator.remove_weight_norm()
     return generator

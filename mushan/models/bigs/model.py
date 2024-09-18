@@ -7,6 +7,7 @@ from torch.nn.utils.parametrizations import weight_norm
 import math
 from torch import nn, sin, pow
 from torch.nn import Parameter
+from mushan.models.ren import EnhWrapper
 
 LRELU_SLOPE = 0.1
 
@@ -388,10 +389,10 @@ class AMPBlock2(torch.nn.Module):
 
 class BigVSAN(torch.nn.Module):
     # this is our main BigVSAN model. Applies anti-aliased periodic activation for resblocks.
-    def __init__(self, h):
+    def __init__(self, h, post = True):
         super(BigVSAN, self).__init__()
         self.h = h
-
+        self.post = post
         self.num_kernels = len(h.resblock_kernel_sizes)
         self.num_upsamples = len(h.upsample_rates)
 
@@ -433,6 +434,9 @@ class BigVSAN(torch.nn.Module):
         for i in range(len(self.ups)):
             self.ups[i].apply(init_weights)
         self.conv_post.apply(init_weights)
+        
+        if self.post:
+            self.ren = EnhWrapper('cpu')
 
     def remove_weight_norm(self):
         """Remove weight normalization module from all of the layers."""
@@ -467,6 +471,34 @@ class BigVSAN(torch.nn.Module):
         x = self.conv_post(x)
         x = torch.tanh(x)
 
+        return x
+    
+    @torch.inference_mode()
+    def infer(self, x):
+        # pre conv
+        x = self.conv_pre(x)
+
+        for i in range(self.num_upsamples):
+            # upsampling
+            for i_up in range(len(self.ups[i])):
+                x = self.ups[i][i_up](x)
+            # AMP blocks
+            xs = None
+            for j in range(self.num_kernels):
+                if xs is None:
+                    xs = self.resblocks[i * self.num_kernels + j](x)
+                else:
+                    xs += self.resblocks[i * self.num_kernels + j](x)
+            x = xs / self.num_kernels
+
+        # post conv
+        x = self.activation_post(x)
+        x = self.conv_post(x)
+        x = torch.tanh(x)
+        if self.post:
+            print(x.shape)
+            x = self.ren.infer_wave(x.squeeze(0), 16000)
+            print(x.shape)
         return x
 
     # def remove_weight_norm(self):

@@ -170,6 +170,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         self._language_balance()
         self._duration_balance()
         self._repeat()
+        self.pre_nar_language_ref()
         
         random.shuffle(self.audiopaths_sid_text)
         self.audio_lengths = [float(i[2]) for i in self.audiopaths_sid_text]
@@ -331,7 +332,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         if self.rank == 0:
             logger.info("=" * 40)
             logger.info(f"Using audio length balancer, ratio: {str(self.optional['audio_dur_balance_step_size'])}")
-            logger.info(f"Before furation balance resample: {len(self.audiopaths_sid_text)}")
+            logger.info(f"Before duration balance resample: {len(self.audiopaths_sid_text)}")
             
         new_audiopaths_sid_text = []
         
@@ -343,7 +344,8 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         
         
         self.audiopaths_sid_text = new_audiopaths_sid_text
-        logger.info(f"After furation balance resample: {len(self.audiopaths_sid_text)}")
+        if self.rank == 0:
+            logger.info(f"After duration balance resample: {len(self.audiopaths_sid_text)}")
 
 
     def _repeat(self):
@@ -1021,11 +1023,15 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         
         
     def get_mms_corr_mel_160(self, audiopath_sid_text):
+        if "160_mel_postfix" not in self.optional.keys():
+            mel_post_fix = ".160"
+        else:
+            mel_post_fix = self.optional["160_mel_postfix"]
         data = self.torch_load_single(
             audiopath_sid_text,
             path_replaecments={
                 "/wave/": "/feature/mel_spec/",
-                ".flac": ".160"
+                ".flac": mel_post_fix
             },
             return_key="mel_spec",
         )['mel_spec']
