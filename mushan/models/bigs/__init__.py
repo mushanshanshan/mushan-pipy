@@ -16,13 +16,13 @@ def load_checkpoint(filepath):
     print("Complete.")
     return checkpoint_dict
 
-def get_model(config, ckp):
+def get_model(config, ckp, post = True):
     with open(config) as f:
         data = f.read()
     json_config = json.loads(data)
     h = AttrDict(json_config)
     state_dict_g = load_checkpoint(ckp)
-    generator = BigVSAN(h)
+    generator = BigVSAN(h, post)
     generator.load_state_dict(state_dict_g['generator'])
     
     if generator.post:

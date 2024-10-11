@@ -726,7 +726,9 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         mms_file = audiopath.replace(
             "/wave/", "/feature/mms/").replace(".flac", self.optional['mms_rvq_code_postfix'])
         data = torch.load(mms_file, mmap=True, map_location='cpu', weights_only=False)
-        data = rearrange(data, 'g l q -> (q g) l')
+        
+        if len(data.shape) == 3:
+            data = rearrange(data, 'g l q -> (q g) l')
         
         return {"mms_rvq_code": data}
     

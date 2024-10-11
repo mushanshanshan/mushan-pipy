@@ -131,6 +131,7 @@ mushan/models/ren/utils/logging.py
 mushan/models/ren/utils/train_loop.py
 mushan/models/ren/utils/utils.py
 mushan/models/s0vq/__init__.py
+mushan/models/s0vq/linear.py
 mushan/models/s0vq/with_loss.py
 mushan/models/s0vq/with_tran.py
 mushan/models/speaker_encoder/EPACA_TDNN.py

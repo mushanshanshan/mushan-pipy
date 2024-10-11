@@ -64,7 +64,7 @@ class EnhWrapper:
         dwav = dwav.mean(dim=0).to(self.device)
         wav, new_sr = inference(model=self.net, dwav=dwav, sr=ori_sr, device=self.device)
         resampler = T.Resample(new_sr, ori_sr, dtype=wav.dtype)
-        wav = resampler(wav)
+        wav = resampler(wav.cpu())
         
         return wav
 
@@ -74,6 +74,6 @@ class EnhWrapper:
         dwav = dwav.mean(dim=0).to(self.device)
         wav, new_sr = inference(model=self.net, dwav=dwav, sr=ori_sr, device=self.device)
         resampler = T.Resample(new_sr, ori_sr, dtype=wav.dtype)
-        wav = resampler(wav)
+        wav = resampler(wav.cpu())
         
         return wav

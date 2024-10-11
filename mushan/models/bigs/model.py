@@ -389,7 +389,7 @@ class AMPBlock2(torch.nn.Module):
 
 class BigVSAN(torch.nn.Module):
     # this is our main BigVSAN model. Applies anti-aliased periodic activation for resblocks.
-    def __init__(self, h, post = True):
+    def __init__(self, h, device = 'cuda', post = True):
         super(BigVSAN, self).__init__()
         self.h = h
         self.post = post
@@ -436,7 +436,10 @@ class BigVSAN(torch.nn.Module):
         self.conv_post.apply(init_weights)
         
         if self.post:
-            self.ren = EnhWrapper('cpu')
+            if torch.cuda.is_available():
+                self.ren = EnhWrapper("cuda")
+            else:
+                self.ren = EnhWrapper("cpu")
 
     def remove_weight_norm(self):
         """Remove weight normalization module from all of the layers."""
@@ -496,9 +499,7 @@ class BigVSAN(torch.nn.Module):
         x = self.conv_post(x)
         x = torch.tanh(x)
         if self.post:
-            print(x.shape)
             x = self.ren.infer_wave(x.squeeze(0), 16000)
-            print(x.shape)
         return x
 
     # def remove_weight_norm(self):

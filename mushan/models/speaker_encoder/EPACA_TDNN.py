@@ -121,6 +121,7 @@ class EPACA_TDNN(nn.Module):
         cat_channels = channels * 3
         self.conv = nn.Conv1d(cat_channels, 1536, kernel_size=1)
         self.pooling = AttentiveStatsPool(1536, 128)
+        
         self.bn1 = nn.BatchNorm1d(3072)
         self.linear = nn.Linear(3072, embd_dim)
         self.bn2 = nn.BatchNorm1d(embd_dim)
@@ -133,8 +134,12 @@ class EPACA_TDNN(nn.Module):
 
         out = torch.cat([out2, out3, out4], dim=1)
         out = F.relu(self.conv(out), inplace=True).contiguous()
-        out = self.bn1(self.pooling(out))
-        out = self.bn2(self.linear(out))
+        if out.shape[0] > 1:
+            out = self.bn1(self.pooling(out))
+            out = self.bn2(self.linear(out))
+        else:
+            print("Get batch_size == 1, only for test propose!")
+            out = self.linear(self.pooling(out))
         return out
     
     

@@ -12,18 +12,20 @@ def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e6
 
 def enable_debug_mode():
-    os.environ['MUSHAN_DEBUG']= "1"
+    os.environ['MUSHAN_DEBUG'] = "1"
     print("Debug model: Enable")
 
 def check_debug_mode():
-    return os.getenv('path') == "1"
+    return os.getenv('MUSHAN_DEBUG', '0') == "1"
 
 def disable_debug_mode():
-    os.environ['MUSHAN_DEBUG']= "0"
+    os.environ['MUSHAN_DEBUG'] = "0"
     print("Debug model: Disable")
     
     
 def debug_shape(*args):
+    if not check_debug_mode():
+        return
     for i in range(len(args)):
         assert isinstance(args[i], torch.Tensor)
         print(f"{argname(f'args[{i}]')}.shape: {str(list(args[i].shape))}, {str(args[i].dtype)[6:]}")
