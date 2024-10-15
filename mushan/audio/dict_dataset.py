@@ -130,6 +130,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         self.need_text = any("text" in i for i in self.data_list)
         self.need_phoneme = any("phoneme" in i for i in self.data_list)
         
+        
         if 'text_to_id_map' in self.optional.keys():
             self.text_to_id_map = self.optional['text_to_id_map']
         else:
@@ -142,6 +143,9 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         self.language_code = language_code
         
         self.language_class = max(list(self.language_map.values()))
+        
+        self.ori_text_dict = {}
+        self.text_dict = {}
 
         if config.data.language == 'ch':
             self.language = 'ch'
@@ -413,6 +417,12 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
                     if not self.need_phoneme:
                         pho = " "
 
+                    self.ori_text_dict[audiopath] = ori_text
+                    self.text_dict[audiopath] = pho
+                    
+                    ori_text = ""
+                    pho = ""
+                    
                     audiopaths_sid_text_new.append(
                         [audiopath, spk, dur, ori_text, pho])
                     total_dur += dur
@@ -585,8 +595,14 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         elif '/ftspeech/' in audiopath:
             language_name = 'Danish'
             lang_id =  self.language_code[language_name]
+        elif '/cv_16/ita' in audiopath:
+            language_name = 'Italian'
+            lang_id =  self.language_code[language_name]
         elif '/vp_ita' in audiopath:
             language_name = 'Italian'
+            lang_id =  self.language_code[language_name]
+        elif '/magic_cn' in audiopath:
+            language_name = 'Mandarin Chinese'
             lang_id =  self.language_code[language_name]
         elif '/mls_16/' in audiopath:
             language_name = self.language_map[audiopath.split('/')[-5]]
@@ -945,6 +961,21 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         
     def get_nar_random_stage(self, audiopath_sid_text):
         return {}
+    
+    def get_nar_feature(self, audiopath_sid_text):
+        mms_file = audiopath_sid_text[0].replace(
+            "/wave/", "/feature/mms/").replace(".flac", self.optional['mms_rvq_code_postfix'])
+        mms_data = torch.load(mms_file, mmap=True, map_location='cpu', weights_only=False)
+        
+        mel_vq_file = audiopath_sid_text[0].replace(
+            "/wave/", "/feature/melvq/").replace(".flac", self.optional['melvq_code_postfix'])
+        mel_vq_data = torch.load(mel_vq_file, mmap=True, map_location='cpu', weights_only=False)
+        
+        mms_data = rearrange(mms_data, 'g q l -> (g q) l')
+        
+        return {"mms_rvq_code": mms_data,
+                "mel_grvq_code": mel_vq_data,
+                } 
         
     def get_mms_with_mel_vq(self, audiopath_sid_text):
         mms_data = self.get_mms_rvq_code(audiopath_sid_text)['mms_rvq_code']
@@ -1116,9 +1147,29 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         assert os.path.exists(spec_filename), spec_filename
 
         spec = torch.load(spec_filename, map_location='cpu', weights_only=False).to(torch.long)
-        if spec.shape[-1] > self.optional['mel_vq_ref_length']:
-            spec = spec[:, :, :self.optional['mel_vq_ref_length']].clone()
-        return {"melvq_ref": spec}
+        
+        current_length = spec.shape[-1]
+        target_length = self.optional['mel_vq_ref_length']
+
+        if current_length > target_length:
+            # Randomly select a start point for cropping
+            start_idx = random.randint(0, current_length - target_length)
+            adjusted_spec = spec[:, :, start_idx:start_idx + target_length]
+        
+        elif current_length < target_length:
+            # Repeat the tensor along the last dimension to match the target length
+            repeat_factor = (target_length + current_length - 1) // current_length  # Calculate how many times to repeat
+            repeated_spec = spec.repeat(1, 1, repeat_factor)  # Repeat along the last dimension
+            adjusted_spec = repeated_spec[:, :, :target_length]  # Ensure it is exactly target_length
+        
+        else:
+            # No adjustment needed if lengths are equal
+            adjusted_spec = spec
+        
+        # Ensure final spec has the correct length
+        assert adjusted_spec.shape[-1] == target_length, f"Expected {target_length}, but got {adjusted_spec.shape[-1]}"
+        
+        return {"melvq_ref": adjusted_spec}
 
     def get_mel_ref(self, audiopath_sid_text):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
@@ -1195,6 +1246,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
 
     def get_text(self, audiopath_sid_text):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
+        ori_text = self.ori_text_dict[audiopath]
         text_norm = self.frontend.textonly_to_idx(ori_text)
         return {"text": text_norm}
     
@@ -1205,6 +1257,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
 
     def get_phoneme(self, audiopath_sid_text):
         audiopath, spk, dur, ori_text, text = audiopath_sid_text
+        text = self.text_dict[audiopath]
         if "phoneme_idx_intersperse" in self.optional.keys() and self.optional['phoneme_idx_intersperse'] == True:
             text_norm = self.frontend.pho_to_idx(text, add_blank=True)
         else:
@@ -1335,12 +1388,13 @@ class TextAudioSpeakerCollate():
     """ Zero-pads model inputs and targets
     """
 
-    def __init__(self, config=None, optional={}, return_ids=False, tacotron=False):
+    def __init__(self, config=None, optional={}, return_ids=False, debug=False):
 
         self.return_ids = return_ids
         self.data_list = config.data.data_list
         self.optional = optional
         self.warn_msg = set()
+        self.debug = debug
 
     def collect_language_idx(self, batch, ids_sorted_decreasing):
         lang_idx = torch.LongTensor(len(batch))
@@ -1631,7 +1685,7 @@ class TextAudioSpeakerCollate():
     
     
     def collect_melvq_ref(self, batch, ids_sorted_decreasing):
-        max_ref_len = max([x["melvq_ref"].shape[-1] for x in batch]) + 1
+        max_ref_len = max([x["melvq_ref"].shape[-1] for x in batch])
         ref_padded = torch.LongTensor(
             len(batch), 4, self.optional['mel_vq_quan_size'], max_ref_len)
         ref_padded.fill_(self.optional['mel_vq_pad_idx'])
@@ -1694,6 +1748,56 @@ class TextAudioSpeakerCollate():
                 'num_last_tokens': max_data_length - min(text_lengths),
                 "mms_code_length": mms_code_length,
                 "text_lengths": text_lengths}
+        
+    def collect_nar_feature(self, batch, ids_sorted_decreasing):
+        seg_limit = self.optional['seg_limit']
+        
+        mms_min_len = min([x['mms_rvq_code'].shape[-1] for x in batch])
+        mel_vq_min_len = min([x['mel_grvq_code'].shape[-1] for x in batch])
+        
+        mms_padded = torch.LongTensor(len(batch), 8, seg_limit)
+        mms_padded.fill_(self.optional['mms_pad_idx'])
+        mel_vq_padded = torch.LongTensor(len(batch), 4, self.optional['mel_vq_quan_size'], seg_limit * 2)
+        mel_vq_padded.fill_(self.optional['mel_vq_pad_idx'])
+        
+        if mms_min_len < seg_limit:
+            mms_start_index, mel_start_index = -1, -1
+        else:
+            mms_start_index = random.randint(0, mms_min_len - self.optional['seg_limit'])
+            mms_end_index = mms_start_index + self.optional['seg_limit']
+            
+            mel_start_index = mms_start_index * 2
+            mel_end_index = mel_start_index + self.optional['seg_limit'] * 2
+        
+        if self.debug:
+            if mms_start_index == -1:
+                print(f"MMS/MEL: 0 -> {seg_limit}")
+            else:
+                print(f"MMS: {mms_start_index / mms_min_len} -> {mms_end_index / mms_min_len}")
+                print(f"MEL: {mel_start_index / mel_vq_min_len} -> {mel_end_index / mel_vq_min_len}")
+        
+        for i in range(len(ids_sorted_decreasing)):
+            row = batch[ids_sorted_decreasing[i]]
+            mms = row['mms_rvq_code']
+            melvq = row['mel_grvq_code']
+            
+            if mms_start_index == -1:
+                temp_l = min(seg_limit, mms.shape[-1])
+                mms_padded[i, :, :temp_l] = mms[:, :temp_l]
+                mel_vq_padded[i, :, :, :temp_l * 2] = melvq[:, :, :temp_l * 2]
+            else:
+                mms_padded[i, :, :] = mms[:, mms_start_index: mms_end_index]
+                mel_vq_padded[i, :, :, :] = melvq[:, :, mel_start_index: mel_end_index]
+        
+        mms_start_index = max(0, mms_start_index)
+        mel_start_index = max(0, mel_start_index)
+        
+        return {"mms_rvq_code": mms_padded,
+                "mel_grvq_code": mel_vq_padded,
+                "mms_start_index": mms_start_index,
+                "mel_start_index": mel_start_index}
+        
+        
         
     def collect_mms_with_mel_vq(self, batch, ids_sorted_decreasing):
         max_len = max([x['mms_rvq_code'].shape[-1] for x in batch])

@@ -8,6 +8,9 @@ from dotmap import DotMap
 import tomli
 import hashlib
 
+def make_parent_dir(f):
+    os.makedirs(os.path.dirname(f), exist_ok = True)
+
 def str_to_int(s):
     # 使用md5哈希函数获取字符串的哈希值
     hash_object = hashlib.md5(s.encode())

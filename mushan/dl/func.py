@@ -2,6 +2,7 @@ import torch
 import os
 from varname import argname
 import torch.nn as nn
+from inspect import getframeinfo, stack
 
 def check_no_grad_parameters(model):
     for name, param in model.named_parameters():
@@ -21,14 +22,39 @@ def check_debug_mode():
 def disable_debug_mode():
     os.environ['MUSHAN_DEBUG'] = "0"
     print("Debug model: Disable")
+
+
+def check_no_grad_parameters(model: nn.Module):
+    """
+    This function checks and prints the names of parameters in the model that do not have gradients (requires_grad=False).
     
+    Args:
+        model (nn.Module): The PyTorch model to check.
+    
+    Returns:
+        List of parameter names that do not have gradients.
+    """
+    no_grad_params = []
+    
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            no_grad_params.append(name)
+    
+    if no_grad_params:
+        print("Parameters with no gradients (requires_grad=False):")
+        for param_name in no_grad_params:
+            print(param_name)
+    else:
+        print("All parameters have gradients (requires_grad=True).")
+    
+    return no_grad_params
     
 def debug_shape(*args):
     if not check_debug_mode():
         return
     for i in range(len(args)):
         assert isinstance(args[i], torch.Tensor)
-        print(f"{argname(f'args[{i}]')}.shape: {str(list(args[i].shape))}, {str(args[i].dtype)[6:]}")
+        print(f"{argname(f'args[{i}]')}.shape: {str(list(args[i].shape))}")
         
 def debug_nan(*args):
     for i in range(len(args)):
