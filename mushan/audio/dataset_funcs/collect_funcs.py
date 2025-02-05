@@ -849,6 +849,16 @@ def collect_enhubert_code(self, batch, ids_sorted_decreasing, pad_value=511):
         pad_value=pad_value,
         feature_dtype=torch.long
     )
+    
+def collect_text_token(self, batch, ids_sorted_decreasing, pad_value=511):
+    assert "text_token_pad" in self.optional.keys()
+    return self.collect_1D_with_length(
+        batch,
+        ids_sorted_decreasing,
+        feature_key="text_token",
+        pad_value=self.optional["text_token_pad"],
+        feature_dtype=torch.long
+    )
 
 def collect_robert(self, batch, ids_sorted_decreasing):
     max_pho_len = max([len(x['phoneme']) for x in batch])

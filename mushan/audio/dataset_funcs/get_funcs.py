@@ -493,7 +493,24 @@ def get_enhubert_code(self, audiopath_sid_text):
         return_key="hubert_code",
     )
 
-
+def get_text_token(self, audiopath_sid_text):
+    assert "text_token_suffix" in self.optional.keys()
+    audiopath, _, _, _, _ = audiopath_sid_text
+    seq = self.torch_load_single(
+        audiopath_sid_text,
+        path_replaecments={
+            "/wave/": "/feature/text_token/",
+            get_file_extension(audiopath): self.optional["text_token_suffix"]
+        },
+        return_key="text_token",
+    )["text_token"]
+    
+    if "text_token_intersperse" in self.optional.keys():
+        inter_seq = torch.ones(seq.shape[-1] * 2 + 1, dtype=seq.dtype, device=seq.device) * item
+        inter_seq[1::2] = seq
+        seq = inter_seq
+        
+    return {"text_token": seq}
 
 def get_robert(self, audiopath_sid_text, layer=3):
     audiopath, spk, dur, ori_text, text = audiopath_sid_text
