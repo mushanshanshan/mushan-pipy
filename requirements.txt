@@ -9,6 +9,8 @@ Unidecode
 p_tqdm
 varname
 tqdm
+jieba
+torchinfo
 loguru
 dotmap
 inflect
@@ -16,5 +18,9 @@ encodec
 lhotse
 torchaudio
 pysptk
+g2pM
+pypinyin
 fastdtw
 pyworld
+gdown
+descript-audio-codec

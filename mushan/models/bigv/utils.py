@@ -53,10 +53,10 @@ def mel_spectrogram(y,
                     fmax = 12000, 
                     center=False):
     
-    if torch.min(y) < -1.:
-        print('min value is ', torch.min(y))
-    if torch.max(y) > 1.:
-        print('max value is ', torch.max(y))
+    # if torch.min(y) < -1.:
+    #     print('min value is ', torch.min(y))
+    # if torch.max(y) > 1.:
+    #     print('max value is ', torch.max(y))
 
     global mel_basis, hann_window
     if fmax not in mel_basis:

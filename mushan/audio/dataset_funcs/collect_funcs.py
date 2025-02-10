@@ -859,7 +859,17 @@ def collect_text_token(self, batch, ids_sorted_decreasing, pad_value=511):
         pad_value=self.optional["text_token_pad"],
         feature_dtype=torch.long
     )
+    
+def collect_ori_text(self, batch, ids_sorted_decreasing):
+    all_text = []
+    for i in range(len(ids_sorted_decreasing)):
+        row = batch[ids_sorted_decreasing[i]]
+        all_text.append(row['ori_text'])
+    return {"ori_text": all_text}
 
+        
+        
+        
 def collect_robert(self, batch, ids_sorted_decreasing):
     max_pho_len = max([len(x['phoneme']) for x in batch])
 

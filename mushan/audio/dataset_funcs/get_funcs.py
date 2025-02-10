@@ -506,7 +506,7 @@ def get_text_token(self, audiopath_sid_text):
     )["text_token"]
     
     if "text_token_intersperse" in self.optional.keys():
-        inter_seq = torch.ones(seq.shape[-1] * 2 + 1, dtype=seq.dtype, device=seq.device) * item
+        inter_seq = torch.ones(seq.shape[-1] * 2 + 1, dtype=seq.dtype, device=seq.device) * self.optional["text_token_intersperse"]
         inter_seq[1::2] = seq
         seq = inter_seq
         
@@ -560,7 +560,7 @@ def get_mel_spec(self, audiopath_sid_text):
         return_key="mel_spec",
     )
     
-def get_mel_spec_for_dac(self, audiopath_sid_text):
+def get_mel_with_dac(self, audiopath_sid_text):
     audiopath, _, _, _, _ = audiopath_sid_text
     wave, sr = torchaudio.load(audiopath)
     
@@ -586,7 +586,8 @@ def get_mel_spec_for_dac(self, audiopath_sid_text):
     if self.debug:
         print(f"MEL: {mel.shape[-1]}| DAC: {dac.shape[-1]}")
     
-    return {"mel_spec": mel}
+    return {"mel_spec": mel,
+            "dac_audio_token": dac}
     
 def get_dac_audio_token(self, audiopath_sid_text):
     if "dac_audio_token_suffix" in self.optional.keys():
@@ -953,6 +954,10 @@ def get_mhubert_ref(self, audiopath_sid_text):
         spec = spec[start: start+150]
     return {"mhubert_ref": spec}
 
+def get_ori_text(self, audiopath_sid_text):
+    audiopath, spk, dur, ori_text, text = audiopath_sid_text
+    return {"ori_text": self.ori_text_dict[audiopath]}
+
 def get_text(self, audiopath_sid_text):
     audiopath, spk, dur, ori_text, text = audiopath_sid_text
     ori_text = self.ori_text_dict[audiopath]
@@ -995,9 +1000,17 @@ def get_wave_audio(self, audiopath_sid_text):
 def get_seg_wave_audio(self, audiopath_sid_text):
     audiopath, spk, dur, ori_text, text = audiopath_sid_text
     data, sr = torchaudio.load(audiopath)
-    rand_idx = random.randint(
-        0, data.shape[-1] - self.optional['wave_seg_size'])
-    data = data[:, rand_idx: rand_idx+self.optional['wave_seg_size']]
+    wave_seg_size = self.optional['wave_seg_size']
+
+    # 如果音频长度小于 wave_seg_size，则在后面填充 0
+    if data.shape[-1] < wave_seg_size:
+        pad_size = wave_seg_size - data.shape[-1]
+        data = torch.nn.functional.pad(data, (0, pad_size))  # 在最后补零
+    else:
+        # 随机截取一个片段
+        rand_idx = random.randint(0, data.shape[-1] - wave_seg_size)
+        data = data[:, rand_idx: rand_idx + wave_seg_size]
+    
     return {"wave_audio": data.squeeze(0)}
 
 def get_voco_seg_wave_audio_with_mel(self, audiopath_sid_text):

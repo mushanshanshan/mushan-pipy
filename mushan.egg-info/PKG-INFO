@@ -23,6 +23,8 @@ Requires-Dist: Unidecode
 Requires-Dist: p_tqdm
 Requires-Dist: varname
 Requires-Dist: tqdm
+Requires-Dist: jieba
+Requires-Dist: torchinfo
 Requires-Dist: loguru
 Requires-Dist: dotmap
 Requires-Dist: inflect
@@ -30,8 +32,12 @@ Requires-Dist: encodec
 Requires-Dist: lhotse
 Requires-Dist: torchaudio
 Requires-Dist: pysptk
+Requires-Dist: g2pM
+Requires-Dist: pypinyin
 Requires-Dist: fastdtw
 Requires-Dist: pyworld
+Requires-Dist: gdown
+Requires-Dist: descript-audio-codec
 Dynamic: author
 Dynamic: author-email
 Dynamic: classifier

@@ -27,7 +27,7 @@ from librosa.util import normalize
 from einops import rearrange, repeat, reduce
 from transformers import AutoFeatureExtractor, AutoTokenizer, HfArgumentParser
 from mushan.audio.dataset_funcs import get_funcs, collect_funcs
-from mushan.models import get_dac
+from mushan.models.dac import get_dac
 
 def build_black_list(filename, key, target_dir = None):
     if target_dir != None:
@@ -189,7 +189,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         self._language_balance()
         self._duration_balance()
         self._repeat()
-        self._pre_nar_language_ref()
+        # self._pre_nar_language_ref()
 
         self.tokenizer = {}
         

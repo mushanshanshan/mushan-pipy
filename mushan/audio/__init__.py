@@ -3,7 +3,7 @@ from .data import *
 from .plot import *
 from .spec_process import *
 from .encodrc import *
-from .dataset import *
+from .dict_dataset import *
 
 LIBRISPEECH_PART = (
             "dev-clean",
