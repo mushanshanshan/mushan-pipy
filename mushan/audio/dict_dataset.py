@@ -29,11 +29,11 @@ from transformers import AutoFeatureExtractor, AutoTokenizer, HfArgumentParser
 from mushan.audio.dataset_funcs import get_funcs, collect_funcs
 from mushan.models.dac import get_dac
 
-def build_black_list(filename, key, target_dir = None):
+def build_black_list(filename, key, username = "mushan", target_dir = None):
     if target_dir != None:
         key_black_list_path = target_dir
     else:
-        key_black_list_path = f"/home/{os.getlogin()}/data/filelists/blacklists/{key}.pk"
+        key_black_list_path = f"/home/{username}/data/filelists/blacklists/{key}.pk"
     if os.path.exists(key_black_list_path):
         blist = from_pickle(key_black_list_path)
     else:
@@ -595,12 +595,19 @@ class TextAudioSpeakerCollate():
         
 
         self.tokenizer = {}
-        self.tokenizer["input_text"] = AutoTokenizer.from_pretrained(
-                                        "google-t5/t5-small",
-                                        trust_remote_code=True,
-                                        use_fast=True,
-                                        padding_side="left",
+        if 'input_text' in self.optional:
+            self.tokenizer["input_text"] = AutoTokenizer.from_pretrained(
+                                            "google-t5/t5-small",
+                                            trust_remote_code=True,
+                                            use_fast=True,
+                                            padding_side="left",
                                     )
+        if 'spk_desc_toknizer' in self.optional:
+            self.tokenizer["spk_desc_toknizer"] = AutoTokenizer.from_pretrained(
+                                self.optional['spk_desc_toknizer'],
+                                trust_remote_code=True,
+                                use_fast=True,
+                            )
         
         func_counter = 0
         for func_name, func in inspect.getmembers(collect_funcs, inspect.isfunction):
@@ -646,12 +653,12 @@ class TextAudioSpeakerCollate():
         # print(ids_sorted_decreasing)
 
         for key in self.data_list:
-            try:
-                func = getattr(self, f"collect_{key}")
-                res.update(func(batch, ids_sorted_decreasing))
-            except AttributeError:
-                raise NotImplementedError(
-                    "Class `{}` does not implement `{}`".format(self.__class__.__name__, key))
+            # try:
+            func = getattr(self, f"collect_{key}")
+            res.update(func(batch, ids_sorted_decreasing))
+            # except AttributeError:
+            #     raise NotImplementedError(
+            #         "Class `{}` does not implement `{}`".format(self.__class__.__name__, key))
 
         return res
 

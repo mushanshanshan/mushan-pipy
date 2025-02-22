@@ -14,7 +14,7 @@ import lmdb
 import itertools
 from collections import defaultdict
 from loguru import logger
-from mushan.io import from_pickle, to_pickle
+from mushan.io import from_pickle, to_pickle, hashabledict
 from mushan.text.eng.front_end import Frontend as ENFrontend
 from mushan.text.chs.front_end import Frontend as CNFrontend
 from mushan.models.bigv.utils import bigv_mel
@@ -551,6 +551,7 @@ def get_mel_spec(self, audiopath_sid_text):
     else:
         mel_spec_suffix = ".mel"
     audiopath, _, _, _, _ = audiopath_sid_text
+    
     return self.torch_load_single(
         audiopath_sid_text,
         path_replaecments={
@@ -992,9 +993,16 @@ def get_phoneme(self, audiopath_sid_text):
         text_norm = self.frontend.pho_to_idx(text, add_blank=False)
     return {"phoneme": text_norm}
 
+def get_resampled_wave_audio(self, audiopath_sid_text):
+    audiopath, spk, dur, ori_text, text = audiopath_sid_text
+    data, sr = torchaudio.load(audiopath)
+    data = torchaudio.functional.resample(data, self.optional['ori_sample_rate'], self.optional['tar_sample_rate'], lowpass_filter_width=6)
+    return {"wave_audio": data.squeeze(0)}
+
 def get_wave_audio(self, audiopath_sid_text):
     audiopath, spk, dur, ori_text, text = audiopath_sid_text
     data, sr = torchaudio.load(audiopath)
+    
     return {"wave_audio": data.squeeze(0)}
 
 def get_seg_wave_audio(self, audiopath_sid_text):
@@ -1089,7 +1097,116 @@ def get_240_linear_spec(self, audiopath_sid_text):
         return_key="linear_spec",
     )
     
-def get_fun_codec(self, audiopath_sid_text):
+def get_spk_desc_with_neg_emb(self, audiopath_sid_text):
+    audiopath, spk, dur, ori_text, text = audiopath_sid_text
+    spk_desc = from_pickle(audiopath.replace("/wave/", "/feature/spk_desc/").replace(get_file_extension(audiopath), ".pk"))
+    spk_desc = random.choice(spk_desc)
+    
+    if len(spk_desc) > 720:
+        spk_desc = random.choice(spk_desc)
+        
+    neg_emb = []
+    if "sample_neg_speaker" in self.optional.keys():
+        
+        if "facodec_spk_postfix" in self.optional.keys():
+            facodec_spk_postfix = self.optional["facodec_spk_postfix"]
+        else:
+            facodec_spk_postfix = ".s"
+    
+        pos_speaker_info = self.get_spk_info(audiopath_sid_text)['spk_info']
+        neg_utt = self.get_random_neg_utt(pos_speaker_info)['neg_utt']
+        for neg in neg_utt:
+            spk_filename = neg.replace("/wave/", "/feature/fcodec/").replace(get_file_extension(neg), facodec_spk_postfix)
+            assert os.path.exists(spk_filename), spk_filename
+            spk = torch.load(spk_filename, map_location=torch.device('cpu'))
+            neg_emb.append(spk)
+    
+    return {"spk_desc": spk_desc, "neg_emb": neg_emb}
+    
+def get_spk_desc(self, audiopath_sid_text):
+    audiopath, spk, dur, ori_text, text = audiopath_sid_text
+    spk_desc = from_pickle(audiopath.replace("/wave/", "/feature/spk_desc/").replace(get_file_extension(audiopath), ".pk"))
+    spk_desc = random.choice(spk_desc)
+    
+    if len(spk_desc) > 720:
+        spk_desc = random.choice(spk_desc)
+        
+    neg_desc = []
+    if "sample_neg_speaker" in self.optional.keys():
+        pos_speaker_info = self.get_spk_info(audiopath_sid_text)['spk_info']
+        neg_utt = self.get_random_neg_utt(pos_speaker_info)['neg_utt']
+        for neg in neg_utt:
+            cur_neg_desc = from_pickle(neg.replace("/wave/", "/feature/spk_desc/").replace(get_file_extension(neg), ".pk"))
+            cur_neg_desc = random.choice(cur_neg_desc)
+            neg_desc.append(cur_neg_desc)
+    
+    return {"spk_desc": spk_desc, "neg_desc": neg_desc}
+
+def get_spk_info(self, audiopath_sid_text):
+    audiopath, spk, dur, ori_text, text = audiopath_sid_text
+    spk_info = from_pickle(audiopath.replace("/wave/", "/feature/spk_desc/").replace(get_file_extension(audiopath), ".dic"))
+    return {"spk_info": spk_info}
+
+def get_random_neg_utt(self, pos_speaker_info):
+    assert self.optional['sample_neg_speaker'] > 0
+    if 'neg_utt_dict' not in self.optional.keys():
+        self.optional['neg_utt_dict'] = from_pickle(f"/home/mushan/data/filelists/feature/spk2pt.pk")
+        self.optional['neg_utt_dict_key'] = list(self.optional['neg_utt_dict'].keys())
+        
+    str_pos_info = hashabledict()
+    for key, value in pos_speaker_info.items():
+        if isinstance(value, str):
+            str_pos_info[key] = value
+            
+    if self.debug:
+        print("POS KEY:", str_pos_info)
+    neg_utt = []
+    while (len(neg_utt) < self.optional['sample_neg_speaker']):
+
+        random_key = random.choice(self.optional['neg_utt_dict_key'])
+        while (random_key == str_pos_info):
+            random_key = random.choice(self.optional['neg_utt_dict_key'])
+            
+        if self.debug:
+            print("NEG KEY:", random_key)
+            
+            
+        random_utt = random.choice(self.optional['neg_utt_dict'][random_key])
+        neg_utt.append(random_utt)
+        
+    return {"neg_utt": neg_utt}
+    
+
+def get_spk_desc_emb(self, audiopath_sid_text):
+    audiopath, spk, dur, ori_text, text = audiopath_sid_text
+    spk_desc_emb = torch.load(audiopath.replace("/wave/", "/feature/spk_desc/").replace(get_file_extension(audiopath), self.optional['spk_desc_emb_postfix']))
+    spk_desc_emb = random.choice(spk_desc_emb)
+    neg_spk_desc_emb = []
+    pos_speaker_info = self.get_spk_info(audiopath_sid_text)['spk_info']
+    
+    if "sample_neg_speaker" in self.optional.keys():
+        neg_utt = self.get_random_neg_utt(pos_speaker_info)['neg_utt']
+        for neg in neg_utt:
+            neg_emb = torch.load(neg.replace("/wave/", "/feature/spk_desc/").replace(get_file_extension(audiopath), self.optional['spk_desc_emb_postfix']))
+            neg_spk_desc_emb.append(neg_emb)
+    return {"spk_desc_emb": spk_desc_emb, "neg_spk_desc_emb": neg_spk_desc_emb}
+
+def get_facodec_spk(self, audiopath_sid_text):
+    audiopath, spk, dur, ori_text, text = audiopath_sid_text
+    
+    if "facodec_spk_postfix" in self.optional.keys():
+        facodec_spk_postfix = self.optional["facodec_spk_postfix"]
+    else:
+        facodec_spk_postfix = ".s"
+        
+    spk_filename = audiopath.replace("/wave/", "/feature/fcodec/").replace(get_file_extension(audiopath), facodec_spk_postfix)
+    assert os.path.exists(spk_filename), spk_filename
+    spk = torch.load(spk_filename, map_location=torch.device('cpu'))
+    
+    return {"facodec_speaker": spk}
+
+    
+def get_facodec(self, audiopath_sid_text):
     audiopath, spk, dur, ori_text, text = audiopath_sid_text
     
     code_filename = audiopath.replace("/wave/", "/feature/fcodec/").replace(get_file_extension(audiopath), ".c")
@@ -1100,10 +1217,10 @@ def get_fun_codec(self, audiopath_sid_text):
     assert os.path.exists(spk_filename), spk_filename
     spk = torch.load(spk_filename, map_location=torch.device('cpu'))
     
-    return {"fun_codec_prosody": code[:1, :],
-            "fun_codec_content": code[1:3, :],
-            "fun_codec_details": code[3:, :],
-            "fun_codec_speaker": spk}
+    return {"facodec_prosody": code[:1, :],
+            "facodec_content": code[1:3, :],
+            "facodec_details": code[3:, :],
+            "facodec_speaker": spk}
 
 def get_your_ref(self, audiopath_sid_text):
     audiopath, spk, dur, ori_text, text = audiopath_sid_text
@@ -1120,11 +1237,11 @@ def get_audio_text_speaker_pair(self, audiopath_sid_text):
     res = {}
     self.temp_arg = None
     for key in self.data_list:
-        try:
-            func = getattr(self, f"get_{key}")
-            res.update(func(audiopath_sid_text))
-        except AttributeError:
-            raise NotImplementedError("Class `{}` does not implement `get_{}`".format(self.__class__.__name__, key))
+        # try:
+        func = getattr(self, f"get_{key}")
+        res.update(func(audiopath_sid_text))
+        # except AttributeError:
+        #     raise NotImplementedError("Class `{}` does not implement `get_{}`".format(self.__class__.__name__, key))
         # func = getattr(self, f"get_{key}")
         # res.update(func(audiopath_sid_text))
 

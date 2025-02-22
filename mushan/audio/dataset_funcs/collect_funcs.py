@@ -244,7 +244,6 @@ def collect_mel_spec(self, batch, ids_sorted_decreasing):
             pad_size = (0, target_len - seq_len)  # 在 seq_len 方向右侧 pad
             mel_spec["mel_spec"] = F.pad(mel_spec["mel_spec"], pad=pad_size, mode='constant', value=padding_value)
 
-            
     return mel_spec
     
 
@@ -482,11 +481,16 @@ def collect_mms_corr_mel_160(self, batch, ids_sorted_decreasing):
     
     # def collect_2D_with_length(self, batch, ids_sorted_decreasing, feature_key, length_dim_idx=1, max_length = 0, pad_value=0, feature_dtype=torch.float):
     
-def collect_fun_codec(self, batch, ids_sorted_decreasing):
+def collect_facodec_spk(self, batch, ids_sorted_decreasing):
+    spks = torch.stack([batch[i]["facodec_speaker"] for i in ids_sorted_decreasing])
+    
+    return {"facodec_speaker": spks}    
+
+def collect_facodec(self, batch, ids_sorted_decreasing):
     prosody = self.collect_2D_with_length(
         batch,
         ids_sorted_decreasing,
-        feature_key="fun_codec_prosody",
+        feature_key="facodec_prosody",
         feature_dtype=torch.long,
         pad_value = 1024
     )
@@ -494,7 +498,7 @@ def collect_fun_codec(self, batch, ids_sorted_decreasing):
     content = self.collect_2D_with_length(
         batch,
         ids_sorted_decreasing,
-        feature_key="fun_codec_content",
+        feature_key="facodec_content",
         feature_dtype=torch.long,
         pad_value = 1024
     )
@@ -502,17 +506,17 @@ def collect_fun_codec(self, batch, ids_sorted_decreasing):
     details = self.collect_2D_with_length(
         batch,
         ids_sorted_decreasing,
-        feature_key="fun_codec_details",
+        feature_key="facodec_details",
         feature_dtype=torch.long,
         pad_value = 1024
     )
     
-    spks = torch.stack([batch[i]["fun_codec_speaker"] for i in ids_sorted_decreasing])
+    spks = torch.stack([batch[i]["facodec_speaker"] for i in ids_sorted_decreasing])
     
-    return {"fun_codec_prosody": prosody["fun_codec_prosody"],
-            "fun_codec_content": content["fun_codec_content"],
-            "fun_codec_details": details["fun_codec_details"],
-            "fun_codec_speaker": spks}
+    return {"facodec_prosody": prosody["facodec_prosody"],
+            "facodec_content": content["facodec_content"],
+            "facodec_details": details["facodec_details"],
+            "facodec_speaker": spks}
 
 def collect_audio_path(self, batch, ids_sorted_decreasing):
     info = []
@@ -522,6 +526,60 @@ def collect_audio_path(self, batch, ids_sorted_decreasing):
         info.append(row["audio_path"])
 
     return {"audio_path": info}
+
+
+def collect_spk_desc_with_neg_emb(self, batch, ids_sorted_decreasing):
+    all_spk_desc = []
+    all_neg_emb = []
+    for i in range(len(ids_sorted_decreasing)):
+        row = batch[ids_sorted_decreasing[i]]
+        if isinstance(row['spk_desc'], str):
+            all_spk_desc.append(row['spk_desc'])
+        elif isinstance(row['spk_desc'], list):
+            all_spk_desc += row['spk_desc']
+        else:
+            raise NotImplemented
+        
+        if isinstance(row['neg_emb'], list):
+            all_neg_emb += row['neg_emb']
+        else:
+            all_neg_desc.append(row['neg_emb'])
+
+    
+    if 'spk_desc_toknizer' in self.optional:
+        all_spk_desc = self.tokenizer["spk_desc_toknizer"](all_spk_desc, return_tensors='pt', padding='longest', truncation=True,  max_length=170)
+
+    all_neg_emb = torch.stack(all_neg_emb)
+    
+    return {"spk_desc": all_spk_desc, 
+            "neg_emb": all_neg_emb}
+
+def collect_spk_desc(self, batch, ids_sorted_decreasing):
+    all_spk_desc = []
+    all_neg_desc = []
+    for i in range(len(ids_sorted_decreasing)):
+        row = batch[ids_sorted_decreasing[i]]
+        if isinstance(row['spk_desc'], str):
+            all_spk_desc.append(row['spk_desc'])
+        elif isinstance(row['spk_desc'], list):
+            all_spk_desc += row['spk_desc']
+        else:
+            raise NotImplemented
+        
+        if isinstance(row['neg_desc'], str):
+            all_neg_desc.append(row['neg_desc'])
+        elif isinstance(row['neg_desc'], list):
+            all_neg_desc += row['neg_desc']
+        else:
+            raise NotImplemented
+
+    
+    if 'spk_desc_toknizer' in self.optional:
+        all_spk_desc = self.tokenizer["spk_desc_toknizer"](all_spk_desc, return_tensors='pt', padding='longest', truncation=True,  max_length=170)
+        all_neg_desc = self.tokenizer["spk_desc_toknizer"](all_neg_desc, return_tensors='pt', padding='longest', truncation=True,  max_length=170)
+        
+    return {"spk_desc": all_spk_desc, 
+            "neg_desc": all_neg_desc}
 
 def collect_dummy(self, batch, ids_sorted_decreasing):
     return {}
@@ -992,6 +1050,9 @@ def collect_wave_audio(self, batch, ids_sorted_decreasing):
 
     return {"wave_audio": wave_padded,
             "wave_audio_length": wave_lengths}
+    
+def collect_resampled_wave_audio(self, batch, ids_sorted_decreasing):
+    return self.collect_wave_audio(batch, ids_sorted_decreasing)
 
 def collect_pad_wave_audio(self, batch, ids_sorted_decreasing):
     return self.collect_wave_audio(batch, ids_sorted_decreasing)

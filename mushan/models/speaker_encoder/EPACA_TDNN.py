@@ -111,7 +111,7 @@ class AttentiveStatsPool(nn.Module):
     
 
 class EPACA_TDNN(nn.Module):
-    def __init__(self, in_channels=80, channels=192, embd_dim=256, size = 'small'):
+    def __init__(self, in_channels=80, channels=192, embd_dim=256):
         super().__init__()
         self.layer1 = Conv1dReluBn(in_channels, channels, kernel_size=5, padding=2)
         self.layer2 = SE_Res2Block(channels, kernel_size=3, stride=1, padding=2, dilation=2, scale=8)
@@ -121,7 +121,6 @@ class EPACA_TDNN(nn.Module):
         cat_channels = channels * 3
         self.conv = nn.Conv1d(cat_channels, 1536, kernel_size=1)
         self.pooling = AttentiveStatsPool(1536, 128)
-        
         self.bn1 = nn.BatchNorm1d(3072)
         self.linear = nn.Linear(3072, embd_dim)
         self.bn2 = nn.BatchNorm1d(embd_dim)
@@ -134,72 +133,6 @@ class EPACA_TDNN(nn.Module):
 
         out = torch.cat([out2, out3, out4], dim=1)
         out = F.relu(self.conv(out), inplace=True).contiguous()
-        if out.shape[0] > 1:
-            out = self.bn1(self.pooling(out))
-            out = self.bn2(self.linear(out))
-        else:
-            print("Get batch_size == 1, only for test propose!")
-            out = self.linear(self.pooling(out))
+        out = self.bn1(self.pooling(out))
+        out = self.bn2(self.linear(out))
         return out
-    
-    
-    
-class EPACA_TDNN_warp(nn.Module):
-    def __init__(self, in_channels=80, embd_dim=256, size = 'small'):
-        super().__init__()
-        self.size = size
-        if self.size == 'small':
-            channels = 192
-            cat_channels = channels * 3
-        elif self.size == 'median':
-            channels = 512
-            cat_channels = channels * 3
-        elif self.size == 'large':
-            channels = 1024
-            cat_channels = channels * 3
-        elif self.size == 'xlarge':
-            channels = 1024
-            cat_channels = channels * 5
-            self.layer5 = SE_Res2Block(channels, kernel_size=3, stride=1, padding=6, dilation=6, scale=8)
-            self.layer6 = SE_Res2Block(channels, kernel_size=3, stride=1, padding=7, dilation=7, scale=8)
-            
-        self.layer1 = Conv1dReluBn(in_channels, channels, kernel_size=5, padding=2)
-        self.layer2 = SE_Res2Block(channels, kernel_size=3, stride=1, padding=2, dilation=2, scale=8)
-        self.layer3 = SE_Res2Block(channels, kernel_size=3, stride=1, padding=3, dilation=3, scale=8)
-        self.layer4 = SE_Res2Block(channels, kernel_size=3, stride=1, padding=4, dilation=4, scale=8)
-
-        
-        self.lang_out = nn.Sequential(
-            nn.Conv1d(cat_channels, 1536, kernel_size=1),
-            nn.ReLU(),
-            AttentiveStatsPool(1536, 128),
-            nn.BatchNorm1d(3072),
-            nn.Linear(3072, embd_dim),
-            nn.BatchNorm1d(embd_dim)
-        )
-        
-        self.spk_out = nn.Sequential(
-            nn.Conv1d(cat_channels, 1536, kernel_size=1),
-            nn.ReLU(),
-            AttentiveStatsPool(1536, 128),
-            nn.BatchNorm1d(3072),
-            nn.Linear(3072, embd_dim),
-            nn.BatchNorm1d(embd_dim)
-        )
-
-
-    def forward(self, x):
-        out1 = self.layer1(x)
-        out2 = self.layer2(out1) + out1
-        out3 = self.layer3(out1 + out2) + out1 + out2
-        out4 = self.layer4(out1 + out2 + out3) + out1 + out2 + out3
-        if self.size == 'xlarge':
-            out5 = self.layer5(out1 + out2 + out3 + out4) + out1 + out2 + out3 + out4
-            out6 = self.layer6(out1 + out2 + out3 + out4 + out5) + out1 + out2 + out3 + out4 + out5
-            out = torch.cat([out2, out3, out4, out5, out6], dim=1)
-        else:
-            out = torch.cat([out2, out3, out4], dim=1)
-            
-        lang = self.lang_out(out)
-        spk = self.spk_out(out)
-        return lang, spk

@@ -4,9 +4,15 @@ import os
 import pickle
 import lilcom
 import lzma
+import torchaudio
 from dotmap import DotMap
 import tomli
 import hashlib
+import torchaudio.functional as F
+
+class hashabledict(dict):
+    def __hash__(self):
+        return hash(tuple(sorted(self.items())))
 
 def make_parent_dir(f):
     os.makedirs(os.path.dirname(f), exist_ok = True)
@@ -69,3 +75,11 @@ def from_lzma(filename):
     with lzma.open(filename, "rb") as f:
         data = pickle.load(f)
     return data
+
+def from_audio(filename, target_sr=None):
+    wave, ori_sr = torchaudio.load(filename)
+    if target_sr != None and ori_sr != target_sr:
+        wave = F.resample(wave, ori_sr, target_sr, lowpass_filter_width=6)
+        return wave, target_sr
+    else:
+        return wave, ori_sr
