@@ -76,8 +76,10 @@ def from_lzma(filename):
         data = pickle.load(f)
     return data
 
-def from_audio(filename, target_sr=None):
+def from_audio(filename, target_sr=None, device='cpu'):
     wave, ori_sr = torchaudio.load(filename)
+    if device != 'cpu':
+        wave = wave.to(device)
     if target_sr != None and ori_sr != target_sr:
         wave = F.resample(wave, ori_sr, target_sr, lowpass_filter_width=6)
         return wave, target_sr

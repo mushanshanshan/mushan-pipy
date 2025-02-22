@@ -18,6 +18,9 @@ def disable_debug_mode():
     os.environ['MUSHAN_DEBUG'] = "0"
     print("Debug model: Disable")
 
+def freeze_module(module):
+    for param in module.parameters():
+        param.requires_grad = False
 
 def check_no_grad_parameters(model: nn.Module):
     """
