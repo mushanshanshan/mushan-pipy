@@ -99,6 +99,32 @@ def bigv_mel(audio,
     mel = mel_spectrogram(audio, n_fft, num_mels, sampling_rate, hop_size, win_size, fmin, fmax, center=False).squeeze(0).cpu()
     return mel
 
+def norm_torch(wave):
+    max_val = abs(wave.max())
+    min_val = abs(wave.min())
+
+    ratio = 1 / (max(max_val, min_val) + 1e-7) 
+    return wave / ratio
+
+def bigv_mel_torch(audio,
+            n_fft = 1024, 
+            num_mels = 100, 
+            sampling_rate = 24000, 
+            hop_size = 256, 
+            win_size = 1024, 
+            fmin = 0, 
+            fmax = 12000, ):
+    if isinstance(audio, str):
+        audio, sampling_rate = torchaudio.load(audio)
+    else:
+        sampling_rate = 24000
+    
+    audio = audio.squeeze(0)
+    audio = norm_torch(audio) * 0.95
+    audio = audio.unsqueeze(0)
+    mel = mel_spectrogram(audio, n_fft, num_mels, sampling_rate, hop_size, win_size, fmin, fmax, center=False).squeeze(0).cpu()
+    return mel
+
 
 class AttrDict(dict):
     def __init__(self, *args, **kwargs):

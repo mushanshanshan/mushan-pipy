@@ -1,1 +1,1 @@
-from .utils import bigv, bigv_mel
+from .utils import bigv, bigv_mel, bigv_mel_torch

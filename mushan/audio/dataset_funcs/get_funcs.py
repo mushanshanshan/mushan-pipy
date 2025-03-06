@@ -14,7 +14,7 @@ import lmdb
 import itertools
 from collections import defaultdict
 from loguru import logger
-from mushan.io import from_pickle, to_pickle, hashabledict
+from mushan.io import from_pickle, to_pickle, hashabledict, from_audio
 from mushan.text.eng.front_end import Frontend as ENFrontend
 from mushan.text.chs.front_end import Frontend as CNFrontend
 from mushan.models.bigv.utils import bigv_mel
@@ -175,6 +175,10 @@ def get_language_idx(self, audiopath_sid_text):
     else:
         raise Exception(f"Unknow language dataset: {audiopath}")
     return {'language_idx': lang_id, 'language_name': language_name}
+
+def get_speaker_index(self, audiopath_sid_text):
+    audiopath, spk, dur, ori_text, text = audiopath_sid_text
+    return {"speaker_index": self.spk_index[spk]}
 
 def get_audio_path(self, audiopath_sid_text):
     audiopath, spk, dur, ori_text, text = audiopath_sid_text
@@ -1122,23 +1126,106 @@ def get_spk_desc_with_neg_emb(self, audiopath_sid_text):
             neg_emb.append(spk)
     
     return {"spk_desc": spk_desc, "neg_emb": neg_emb}
-    
-def get_spk_desc(self, audiopath_sid_text):
+
+def get_dual_neg_input(self, audiopath_sid_text):
     audiopath, spk, dur, ori_text, text = audiopath_sid_text
-    spk_desc = from_pickle(audiopath.replace("/wave/", "/feature/spk_desc/").replace(get_file_extension(audiopath), ".pk"))
-    spk_desc = random.choice(spk_desc)
+    spk_descs = from_pickle(audiopath.replace("/wave/", "/feature/spk_desc/").replace(get_file_extension(audiopath), ".pk"))
+    query_spk_desc = random.choice(spk_descs)
+    if len(query_spk_desc) > 720:
+        query_spk_desc = query_spk_desc[:720]
     
-    if len(spk_desc) > 720:
-        spk_desc = random.choice(spk_desc)
-        
-    neg_desc = []
+    query_wave, query_sr = from_audio(audiopath, target_sr=16000)
+    query_wave = query_wave[:, :160000].squeeze()
+    assert query_sr == 16000
+    
+    neg_spk_desc = []
+    neg_wave = []
+    
     if "sample_neg_speaker" in self.optional.keys():
         pos_speaker_info = self.get_spk_info(audiopath_sid_text)['spk_info']
         neg_utt = self.get_random_neg_utt(pos_speaker_info)['neg_utt']
         for neg in neg_utt:
             cur_neg_desc = from_pickle(neg.replace("/wave/", "/feature/spk_desc/").replace(get_file_extension(neg), ".pk"))
             cur_neg_desc = random.choice(cur_neg_desc)
+            neg_spk_desc.append(cur_neg_desc[:720])
+    
+    if "sample_neg_speaker" in self.optional.keys():
+        pos_speaker_info = self.get_spk_info(audiopath_sid_text)['spk_info']
+        neg_utt = self.get_random_neg_utt(pos_speaker_info)['neg_utt']
+        for neg in neg_utt:
+            cur_neg_wave, cur_neg_sr = from_audio(neg, target_sr=16000)
+            assert cur_neg_sr == 16000
+            neg_wave.append(cur_neg_wave[:, :160000].squeeze())
+    
+    if self.debug:
+        print("-" * 50)
+        print("POS DES:", query_spk_desc[:20])
+        print("NEG DES:")
+        for i in neg_spk_desc:
+            print(i[:20])
+        print("POS WAVE:", query_wave[:8])
+        print("NEG WAVE:")
+        for i in neg_wave:
+            print(i[:8])
+            
+    return {"query_spk_desc": query_spk_desc, "query_wave": query_wave, "neg_spk_desc": neg_spk_desc, "neg_wave": neg_wave,}
+
+def get_spk_label(self, audiopath_sid_text):
+    audiopath, spk, dur, ori_text, text = audiopath_sid_text
+    ori_spk_label = from_pickle(audiopath.replace("/wave/", "/feature/spk_desc/").replace(get_file_extension(audiopath), ".dic"))
+
+    if "speaker_label_to_int_dict" not in self.optional.keys():
+        self.optional['speaker_label_to_int_dict'] = from_pickle("/home/mushan/data/filelists/feature/spklabel2int.pk")
+        
+    if 'speaker_label_input' not in self.optional.keys():
+        self.optional['speaker_label_input'] = ['speaking_rate', 'gender', 'pitch', 'speaker_accent', 'age']
+    
+    spk_label = []
+    for key in self.optional['speaker_label_input']:
+        spk_label.append(self.optional['speaker_label_to_int_dict'][key][ori_spk_label[key]])
+        
+    spk_label = torch.LongTensor(spk_label)
+
+    return {"spk_label": spk_label}
+
+def get_onehot_spk_label(self, audiopath_sid_text):
+    audiopath, spk, dur, ori_text, text = audiopath_sid_text
+    ori_spk_label = from_pickle(audiopath.replace("/wave/", "/feature/spk_desc/").replace(get_file_extension(audiopath), ".dic"))
+
+    if "speaker_label_to_int_dict" not in self.optional.keys():
+        self.optional['speaker_label_to_int_dict'] = from_pickle("/home/mushan/data/filelists/feature/spklabel2int.pk")
+        
+    if 'speaker_label_input' not in self.optional.keys():
+        self.optional['speaker_label_input'] = ['speaking_rate', 'gender', 'pitch', 'speaker_accent', 'age']
+        
+    spk_label = {}
+    for key in self.optional['speaker_label_input']:
+        val = torch.LongTensor([self.optional['speaker_label_to_int_dict'][key][ori_spk_label[key]]])
+        num_cls = len(self.optional['speaker_label_to_int_dict'][key])
+        spk_label[key] = torch.nn.functional.one_hot(val, num_cls).float().squeeze()
+
+    return {"onehot_spk_label": spk_label}
+    
+    
+def get_spk_desc(self, audiopath_sid_text):
+    audiopath, spk, dur, ori_text, text = audiopath_sid_text
+    if "speaker_description_suffix" not in self.optional.keys():
+        self.optional['speaker_description_suffix'] = ".pk"
+    spk_desc = from_pickle(audiopath.replace("/wave/", "/feature/spk_desc/").replace(get_file_extension(audiopath), self.optional['speaker_description_suffix']))
+    spk_desc = random.choice(spk_desc)
+    
+
+        
+    neg_desc = []
+    if "sample_neg_speaker" in self.optional.keys():
+        pos_speaker_info = self.get_spk_info(audiopath_sid_text)['spk_info']
+        neg_utt = self.get_random_neg_utt(pos_speaker_info)['neg_utt']
+        for neg in neg_utt:
+            cur_neg_desc = from_pickle(neg.replace("/wave/", "/feature/spk_desc/").replace(get_file_extension(neg), self.optional['speaker_description_suffix']))
+            cur_neg_desc = random.choice(cur_neg_desc)
             neg_desc.append(cur_neg_desc)
+    else:
+        neg_desc.append(" ")
     
     return {"spk_desc": spk_desc, "neg_desc": neg_desc}
 
@@ -1150,7 +1237,7 @@ def get_spk_info(self, audiopath_sid_text):
 def get_random_neg_utt(self, pos_speaker_info):
     assert self.optional['sample_neg_speaker'] > 0
     if 'neg_utt_dict' not in self.optional.keys():
-        self.optional['neg_utt_dict'] = from_pickle(f"/home/mushan/data/filelists/feature/spk2pt.pk")
+        self.optional['neg_utt_dict'] = from_pickle(f"/home/mushan/data/filelists/feature/spk2pt_clean.pk")
         self.optional['neg_utt_dict_key'] = list(self.optional['neg_utt_dict'].keys())
         
     str_pos_info = hashabledict()
@@ -1176,20 +1263,6 @@ def get_random_neg_utt(self, pos_speaker_info):
         
     return {"neg_utt": neg_utt}
     
-
-def get_spk_desc_emb(self, audiopath_sid_text):
-    audiopath, spk, dur, ori_text, text = audiopath_sid_text
-    spk_desc_emb = torch.load(audiopath.replace("/wave/", "/feature/spk_desc/").replace(get_file_extension(audiopath), self.optional['spk_desc_emb_postfix']))
-    spk_desc_emb = random.choice(spk_desc_emb)
-    neg_spk_desc_emb = []
-    pos_speaker_info = self.get_spk_info(audiopath_sid_text)['spk_info']
-    
-    if "sample_neg_speaker" in self.optional.keys():
-        neg_utt = self.get_random_neg_utt(pos_speaker_info)['neg_utt']
-        for neg in neg_utt:
-            neg_emb = torch.load(neg.replace("/wave/", "/feature/spk_desc/").replace(get_file_extension(audiopath), self.optional['spk_desc_emb_postfix']))
-            neg_spk_desc_emb.append(neg_emb)
-    return {"spk_desc_emb": spk_desc_emb, "neg_spk_desc_emb": neg_spk_desc_emb}
 
 def get_facodec_spk(self, audiopath_sid_text):
     audiopath, spk, dur, ori_text, text = audiopath_sid_text

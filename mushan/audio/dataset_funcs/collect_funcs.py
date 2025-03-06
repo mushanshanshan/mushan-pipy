@@ -553,6 +553,73 @@ def collect_spk_desc_with_neg_emb(self, batch, ids_sorted_decreasing):
     
     return {"spk_desc": all_spk_desc, 
             "neg_emb": all_neg_emb}
+    
+def collect_dual_neg_input(self, batch, ids_sorted_decreasing):
+    all_spk_desc = []
+    all_wave = []
+    
+    for i in range(len(ids_sorted_decreasing)):
+        row = batch[ids_sorted_decreasing[i]]
+        all_spk_desc.append(row['query_spk_desc'])
+        all_wave.append(row['query_wave'])
+        
+    query_spk_desc_size = len(all_spk_desc)
+
+    for i in range(len(ids_sorted_decreasing)):
+        row = batch[ids_sorted_decreasing[i]]
+        if isinstance(row['neg_spk_desc'], str):
+            all_spk_desc.append(row['neg_spk_desc'])
+        elif isinstance(row['neg_spk_desc'], list):
+            all_spk_desc += row['neg_spk_desc']
+        else:
+            raise NotImplemented
+        
+        if isinstance(row['neg_wave'], torch.Tensor):
+            all_wave.append(row['neg_wave'])
+        elif isinstance(row['neg_wave'], list):
+            all_wave += row['neg_wave']
+        else:
+            raise NotImplemented
+        
+    neg_spk_desc_size = len(all_spk_desc) - query_spk_desc_size
+
+    ori_all_spk_desc = all_spk_desc
+    if 'spk_desc_toknizer' in self.optional:
+        all_spk_desc = self.tokenizer["spk_desc_toknizer"](all_spk_desc, return_tensors='pt', padding='longest', truncation=True,  max_length=170)
+
+    all_wave = torch.nn.utils.rnn.pad_sequence(all_wave, batch_first=True, padding_value=0.0)
+        
+    return {"all_spk_desc": all_spk_desc, 
+            "ori_all_spk_desc": ori_all_spk_desc,
+            "all_wave": all_wave,
+            "query_size": query_spk_desc_size,
+            "neg_size": neg_spk_desc_size}
+
+def collect_spk_label(self, batch, ids_sorted_decreasing):
+    all_spk_label = []
+
+    for i in range(len(ids_sorted_decreasing)):
+        row = batch[ids_sorted_decreasing[i]]
+        all_spk_label.append(row['spk_label'])
+
+    all_spk_label = torch.stack(all_spk_label)
+        
+    return {"spk_label": all_spk_label}
+
+
+def collect_onehot_spk_label(self, batch, ids_sorted_decreasing):
+    all_spk_label = defaultdict(list)
+
+    for i in range(len(ids_sorted_decreasing)):
+        row = batch[ids_sorted_decreasing[i]]
+        for k, v in row['onehot_spk_label'].items():
+            all_spk_label[k].append(v)
+            
+    for k, v in all_spk_label.items():
+        all_spk_label[k] = torch.stack(v)
+
+        
+    return {"onehot_spk_label": all_spk_label}
 
 def collect_spk_desc(self, batch, ids_sorted_decreasing):
     all_spk_desc = []
@@ -990,6 +1057,16 @@ def collect_trans_spk_desc_token(self, batch, ids_sorted_decreasing):
 
 def collect_custom_text(self, batch, ids_sorted_decreasing):
     return self.collect_text(batch, ids_sorted_decreasing)
+
+
+def collect_speaker_index(self, batch, ids_sorted_decreasing):
+    all_labels = []
+    
+    for i in range(len(ids_sorted_decreasing)):
+        row = batch[ids_sorted_decreasing[i]]
+        all_labels.append(row['speaker_index'])
+        
+    return {"speaker_index": torch.LongTensor(all_labels)}
 
 def collect_phoneme(self, batch, ids_sorted_decreasing):
     max_pho_len = max([len(x['phoneme']) for x in batch])

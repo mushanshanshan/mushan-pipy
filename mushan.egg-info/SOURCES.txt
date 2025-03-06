@@ -81,6 +81,7 @@ mushan/models/hifigan/__init__.py
 mushan/models/hifigan/mms.py
 mushan/models/hubert/__init__.py
 mushan/models/kmean/__init__.py
+mushan/models/mas/__init__.py
 mushan/models/modules/__init__.py
 mushan/models/modules/base.py
 mushan/models/modules/diffsinger_decoder.py

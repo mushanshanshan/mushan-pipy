@@ -87,7 +87,6 @@ def english_cleaners_wo_pho(text):
     '''Pipeline for English text, including abbreviation expansion. + punctuation + stress'''
     text = convert_to_ascii(text)
     text = lowercase(text)
-    text = expand_numbers(text)
     text = expand_abbreviations(text)
     return text
 

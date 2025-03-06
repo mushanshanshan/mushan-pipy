@@ -125,6 +125,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
                         f"Added train file : {i}, length : {len(temp)}")
 
         self.ref_dict = defaultdict(list)
+        self.spk_index = defaultdict(int)
         self.data_list = config.data.data_list
         self.text_cleaners = config.data.text_cleaners
         self.max_wav_value = config.data.max_wav_value
@@ -513,6 +514,8 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
                     text_lengths.append(len(pho))
 
                     self.ref_dict[spk].append(audiopath)
+                    if spk not in self.spk_index.keys():
+                        self.spk_index[spk] = len(self.spk_index)
 
             except Exception as e:
                 print(e)
@@ -527,6 +530,9 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         if self.rank == 0:
             logger.info(
                 f"Avaliable data length: {len(self.audiopaths_sid_text)}/{ori_data_length} | {int(total_dur/60/60)} hours")
+            logger.info(
+                f"Total Speaker: {len(self.spk_index)}"
+            )
             
     def filter_mhubert_code(self, audiopath, spk, dur, ori_text, pho):
         return len(pho) / dur > 3 and len(pho) / dur < 25
