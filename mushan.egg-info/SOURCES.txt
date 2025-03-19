@@ -143,6 +143,8 @@ mushan/models/s0vq/with_loss.py
 mushan/models/s0vq/with_tran.py
 mushan/models/speaker_encoder/EPACA_TDNN.py
 mushan/models/speaker_encoder/__init__.py
+mushan/models/temp/__init__.py
+mushan/models/temp/dual_encoder.py
 mushan/models/utmos/__init__.py
 mushan/models/utmos/score.py
 mushan/models/vqs/__init__.py

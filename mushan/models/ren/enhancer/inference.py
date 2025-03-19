@@ -9,7 +9,8 @@ import torchaudio.transforms as T
 
 from ..inference import inference
 from .download import download
-from .train import Enhancer, HParams
+from .enhancer import Enhancer
+from .hparams import HParams
 
 hp = HParams(
     fg_dir=Path('data/fg'),

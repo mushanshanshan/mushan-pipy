@@ -5,7 +5,7 @@ from pathlib import Path
 
 import soundfile
 import torch
-from deepspeed import DeepSpeedConfig
+# from deepspeed import DeepSpeedConfig
 from torch import Tensor
 from tqdm import tqdm
 

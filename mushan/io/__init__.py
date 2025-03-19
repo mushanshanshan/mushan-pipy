@@ -46,6 +46,9 @@ def to_text(filename, data):
             if len(data) > 1 and d[-1] != '\n':
                 d += '\n'
             f.write(d)
+            
+def ensure_folder(filename):
+    os.makedirs(os.path.dirname(filename), exist_ok=True)
 
 def to_pickle(filename, data):
     assert isinstance(filename, str)

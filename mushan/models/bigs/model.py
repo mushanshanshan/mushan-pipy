@@ -7,7 +7,7 @@ from torch.nn.utils.parametrizations import weight_norm
 import math
 from torch import nn, sin, pow
 from torch.nn import Parameter
-from mushan.models.ren import EnhWrapper
+# from mushan.models.ren import EnhWrapper
 
 LRELU_SLOPE = 0.1
 
@@ -436,6 +436,7 @@ class BigVSAN(torch.nn.Module):
         self.conv_post.apply(init_weights)
         
         if self.post:
+            raise NotImplementedError
             if torch.cuda.is_available():
                 self.ren = EnhWrapper("cuda")
             else:

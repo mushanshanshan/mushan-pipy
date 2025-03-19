@@ -321,11 +321,16 @@ def get_double_mms_rvq_code(self, audiopath_sid_text):
     
     audiopath, spk, dur, ori_text, text = audiopath_sid_text
     mms_file = audiopath.replace(
-        "/wave/", "/feature/mms/").replace(get_file_extension(pt), self.optional['mms_rvq_code_postfix'])
+        "/wave/", "/feature/mms/").replace(get_file_extension(audiopath), self.optional['mms_rvq_code_postfix'])
     data = torch.load(mms_file, mmap=True, map_location='cpu', weights_only=False)
+    
+    if self.optional['mms_rvq_code_postfix'] in ['.g4q2d64']:
+        if data.shape[0] == 4 and data.shape[2] == 2:
+            data = rearrange(data, 'g l q -> g q l')
     
     if self.optional['mms_rvq_code_postfix'] not in ['.20c']:
         data = rearrange(data, 'g q l -> (q g) l')
+    
     
     seg_length = self.optional['mms_seg_size']
     
@@ -818,7 +823,7 @@ def get_melvq_ref(self, audiopath_sid_text):
     if self.debug:
         print(f"Speaker Ref : {ref}")
     spec_filename = ref.replace(
-        "/wave/", "/feature/melvq/").replace(get_file_extension(pt), self.optional['melvq_code_postfix'])
+        "/wave/", "/feature/melvq/").replace(get_file_extension(audiopath), self.optional['melvq_code_postfix'])
     assert os.path.exists(spec_filename), spec_filename
 
     spec = torch.load(spec_filename, map_location='cpu', weights_only=False).to(torch.long)
@@ -930,7 +935,7 @@ def get_mel_160_ref(self, audiopath_sid_text):
     if self.debug:
         print(f"Spk Ref : {ref}")
     spec_filename = ref.replace(
-        "/wave/", "/feature/mel_spec/").replace(get_file_extension(pt), mel_spec_suffix)
+        "/wave/", "/feature/mel_spec/").replace(get_file_extension(audiopath), mel_spec_suffix)
     assert os.path.exists(spec_filename), spec_filename
 
     spec = torch.load(spec_filename, map_location='cpu', mmap=True, weights_only=False)
