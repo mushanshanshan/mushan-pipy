@@ -24,3 +24,4 @@ fastdtw
 pyworld
 gdown
 descript-audio-codec
+tomli
